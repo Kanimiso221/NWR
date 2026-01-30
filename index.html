@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEON WARDS: ROGUELITE</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <canvas id="game" aria-label="NEON WARDS canvas"></canvas>
+
+  <div id="hud" aria-live="polite">
+    <div class="row">
+      <div class="meter">
+        <span>HP</span>
+        <div class="bar"><div id="hpBar"></div></div>
+      </div>
+      <div class="meter">
+        <span>FOCUS</span>
+        <div class="bar"><div id="focusBar"></div></div>
+      </div>
+    </div>
+
+    <div class="row small">
+      <div>
+        Room: <span id="room">1</span>
+        &nbsp;|&nbsp; Score: <span id="score">0</span>
+        &nbsp;|&nbsp; FORCE: <span id="force">0</span>
+        <span id="combo"></span>
+      </div>
+      <div>
+        Best: <span id="best">0</span>
+      </div>
+    </div>
+
+    <div class="row tiny">
+      <div id="build">Build: -</div>
+    </div>
+
+    <div class="row tiny">
+      <div id="stageLine" style="display:none">
+        <span id="mapName"></span>
+        <span class="sep"> • </span>
+        <span id="mapGimmick"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay" class="show">
+    <div class="panel">
+      <h1>NEON WARDS: ROGUELITE</h1>
+
+      <div class="modeRow">
+        <div id="modeBadge" class="modeBadge">TITLE</div>
+        <div id="modeStats" class="modeStats"></div>
+      </div>
+      <p class="desc" id="overlayDesc">
+        WASDで移動。マウスで照準、クリックで射撃。
+        Shiftで瞬間ダッシュ(移動方向優先)。SpaceでFOCUS: 選んだ能力を発動。
+        部屋をクリアすると強化をクリックで選択。Eは強化で解禁されるスキル。
+      </p>
+
+      <div id="focusSelectArea" class="focusSelectArea">
+        <div class="focusTitle">FOCUS MODE</div>
+        <div id="focusCards" class="focusCards"></div>
+        <div id="focusDetail" class="focusDetail"></div>
+        <p class="tiny focusHint">クリックで選択。1〜8でも可。Spaceで発動。</p>
+      </div>
+
+      <div id="rewardArea" class="hidden">
+        <h2 id="rewardTitle">CHOOSE 1 UPGRADE</h2>
+        <div id="rewardCards" class="cards"></div>
+        <p class="tiny">クリックで選択。1/2/3も可。Escで一時停止。</p>
+      </div>
+
+
+      <div id="shopArea" class="hidden">
+        <h2 id="shopTitle">SHOP</h2>
+        <div class="shopTop">
+          <div class="shopForce">Your FORCE: <span id="shopForce">0</span></div>
+          <div class="shopBtns">
+            <button id="shopRerollBtn">REROLL (<span id="shopRerollCost">12</span>)</button>
+            <button id="shopLeaveBtn">LEAVE</button>
+          </div>
+        </div>
+        <div id="shopCards" class="cards"></div>
+        <p class="tiny">クリックで購入。足りない場合はグレー表示。Escで退出。</p>
+      </div>
+
+      <div class="buttons" id="menuButtons">
+        <button id="startBtn">START</button>
+        <button id="resumeBtn" class="hidden">RESUME</button>
+        <button id="restartBtn" class="hidden">RESTART</button>
+      </div>
+
+      <div class="opts">
+  <div id="audioOpts" class="audioOpts">
+    <label class="optLine"><input type="checkbox" id="muteChk" /> Mute</label>
+
+    <div class="volGrid" role="group" aria-label="Audio volume">
+      <label class="volLine">
+        <span class="volLabel">BGM</span>
+        <input type="range" id="bgmVol" min="0" max="100" value="35" />
+        <span id="bgmVolVal" class="volVal">35</span><span class="volPct">%</span>
+      </label>
+      <label class="volLine">
+        <span class="volLabel">SE</span>
+        <input type="range" id="sfxVol" min="0" max="100" value="100" />
+        <span id="sfxVolVal" class="volVal">100</span><span class="volPct">%</span>
+      </label>
+    </div>
+  </div>
+
+  <div id="motionOpts" class="motionOpts">
+    <label class="optLine"><input type="checkbox" id="motionChk" /> Reduced motion</label>
+  </div>
+</div>
+      </div>
+
+      <p class="tiny" id="footerHint">Esc: Pause / R: Restart</p>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
