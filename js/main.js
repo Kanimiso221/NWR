@@ -6,6 +6,16 @@ import { Bgm } from "./bgm.js";
 import { ParticleSystem } from "./particles.js";
 import { loadBest, saveBest, loadAudioSettings, saveAudioSettings } from "./storage.js";
 import { clear, drawBackground, drawRoomBounds, drawHazards, drawObstacle, drawPickup, drawBullet, drawEnemy, drawEnemyIndicators, drawPlayer, drawStagePost } from "./renderer.js";
+let scenes = null;
+
+// Scene system (step 1): keep Game as-is, move title/pause/reward/shop/gameover handling into scenes.
+import { SceneManager } from "./scenes/scene_manager.js";
+import { TitleScene } from "./scenes/title_scene.js";
+import { RunScene } from "./scenes/run_scene.js";
+import { PauseScene } from "./scenes/pause_scene.js";
+import { RewardScene } from "./scenes/reward_scene.js";
+import { ShopScene } from "./scenes/shop_scene.js";
+import { GameOverScene } from "./scenes/gameover_scene.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d", { alpha: true });
@@ -102,11 +112,6 @@ const game = new Game({w: W, h: H, sfx, particles});
 let best = loadBest();
 ui.setBest(best);
 
-// Reward/shop UI: re-creating DOM every frame breaks click and makes selection hard to see.
-// We only re-render when the relevant data actually changes.
-let lastRewardHash = "";
-let lastShopHash = "";
-
 function syncSize(){
   if(game.w !== W || game.h !== H){
     game.w = W;
@@ -167,20 +172,15 @@ function refreshHUD(){
   }
 }
 
-ui.onStart(() => {
-  unlockAudioOnce();
-  ui.hide();
-  game.start(ui.getFocusModeId ? ui.getFocusModeId() : "chrono");
-});
-ui.onResume(() => {
-  ui.hide();
-  game.resume();
-});
-ui.onRestart(() => {
-  unlockAudioOnce();
-  ui.hide();
-  game.start(ui.getFocusModeId ? ui.getFocusModeId() : "chrono");
-});
+function renderMenuBackground(dt){
+  clear(ctx, W, H);
+  drawBackground(ctx, W, H, game.camera, game.time, 1, game.stage);
+  game.time += dt * 0.6;
+}
+
+ui.onStart(() => { engine.startRun(); });
+ui.onResume(() => { engine.resumeRun(); });
+ui.onRestart(() => { engine.restartRun(); });
 ui.onMuteChange(() => {
   unlockAudioOnce();
   sfx.setMuted(ui.muted);
@@ -203,27 +203,81 @@ ui.onSfxVolumeChange(() => {
 ui.onPickReward((u) => {
   ui.hide();
   game.pickReward(u);
-  // force a re-render next time
-  lastRewardHash = "";
-  lastShopHash = "";
+  // After picking, Game may enter shop or return to combat.
+  scenes.syncToGameState();
 });
 
 ui.onBuyShop((idx) => {
   game.buyShop(idx);
-  // shopVersion changes, but resetting makes it immediate
-  lastShopHash = "";
+  scenes.syncToGameState();
 });
 ui.onRerollShop(() => {
   game.rerollShop();
-  lastShopHash = "";
+  scenes.syncToGameState();
 });
 ui.onLeaveShop(() => {
   ui.hide();
   game.leaveShop();
-  lastShopHash = "";
+  scenes.syncToGameState();
 });
 
-ui.show("title");
+// --- Scene bootstrap
+const engine = {
+  canvas, ctx,
+  W: () => W,
+  H: () => H,
+  ui, input, game,
+  sfx, bgm, particles,
+  unlockAudioOnce,
+  renderScene,
+  refreshHUD,
+  renderMenuBackground,
+  resize,
+  syncSize,
+};
+
+scenes = new SceneManager(engine);
+scenes.register("title", new TitleScene(engine));
+scenes.register("run", new RunScene(engine));
+scenes.register("pause", new PauseScene(engine));
+scenes.register("reward", new RewardScene(engine));
+scenes.register("shop", new ShopScene(engine));
+scenes.register("gameover", new GameOverScene(engine));
+
+// Expose scene-safe helpers so scenes can drive flow without main.js glue.
+engine.unlockAudioOnce = unlockAudioOnce;
+
+function _getSelectedFocusMode(){
+  if (ui && typeof ui.getFocusModeId === "function") return ui.getFocusModeId();
+  try{
+    if (typeof localStorage !== "undefined") return localStorage.getItem("nw_focusModeId") || localStorage.getItem("nw_focus_mode") || "chrono";
+  }catch(e){}
+  return "chrono";
+}
+
+engine.startRun = () => {
+  unlockAudioOnce();
+  if (ui) ui.hide();
+  game.start(_getSelectedFocusMode());
+  scenes.set("run"); // fades nicely from title
+};
+
+engine.resumeRun = () => {
+  unlockAudioOnce();
+  if (ui) ui.hide();
+  game.resume();
+  scenes.set("run", null, { instant: true });
+};
+
+engine.restartRun = () => {
+  unlockAudioOnce();
+  if (ui) ui.hide();
+  game.start(_getSelectedFocusMode());
+  scenes.set("run", null, { instant: true });
+};
+
+// initial
+scenes.set("title");
 
 let last = performance.now();
 
@@ -235,86 +289,8 @@ function frame(now){
   resize();
   syncSize();
 
-  // global hotkeys
-  if(input.consumePressed("Escape")){
-    if(game.state === "playing"){
-      game.pause();
-      ui.show("pause");
-    }else if(game.state === "paused"){
-      ui.hide();
-      game.resume();
-    }else if(game.state === "shop"){
-      ui.hide();
-      game.leaveShop();
-    }
-  }
-  if(input.consumePressed("KeyR")){
-    if(game.state === "playing" || game.state === "paused" || game.state === "gameover" || game.state === "reward" || game.state === "shop"){
-      unlockAudioOnce();
-      ui.hide();
-      game.start(ui.getFocusModeId ? ui.getFocusModeId() : "chrono");
-    }
-  }
-
-  // Reward quick keys
-  if(game.state === "reward"){
-    if(input.consumePressed("Digit1") || input.consumePressed("Numpad1")){
-      if(game.rewardChoices?.[0]){ ui.hide(); game.pickReward(game.rewardChoices[0]); }
-    }
-    if(input.consumePressed("Digit2") || input.consumePressed("Numpad2")){
-      if(game.rewardChoices?.[1]){ ui.hide(); game.pickReward(game.rewardChoices[1]); }
-    }
-    if(input.consumePressed("Digit3") || input.consumePressed("Numpad3")){
-      if(game.rewardChoices?.[2]){ ui.hide(); game.pickReward(game.rewardChoices[2]); }
-    }
-  }
-
-  if(game.state === "playing"){
-    // leaving reward/shop -> allow a fresh render next time
-    lastRewardHash = "";
-    lastShopHash = "";
-
-    const { timeScale } = game.update(dt, input, ui.reducedMotion);
-    renderScene(timeScale);
-    refreshHUD();
-
-  }else{
-    // menu/shop background
-    clear(ctx, W, H);
-    drawBackground(ctx, W, H, game.camera, game.time, 1);
-    game.time += dt * 0.6;
-
-    // show proper overlay
-    if(game.state === "title"){
-      ui.show("title");
-    }else if(game.state === "paused"){
-      ui.show("pause");
-    }else if(game.state === "gameover"){
-      ui.show("gameover");
-    }else if(game.state === "reward"){
-      const choices = game.rewardChoices || [];
-      const ids = choices.map(u => (u.id ?? u.name ?? "?")).join("|");
-      const hash = `${game.room}|${game.roomIsBoss ? "B" : "N"}|${ids}`;
-      if(hash !== lastRewardHash){
-        ui.showReward(game.room, choices, game.roomIsBoss);
-        lastRewardHash = hash;
-      }else{
-        ui.show("reward");
-      }
-    }else if(game.state === "shop"){
-      const stock = game.shopStock || [];
-      const ids = stock.map(it => `${it.id}:${it.sold?1:0}`).join("|");
-      const hash = `${game.room}|${game.player.force||0}|${game.shopVersion||0}|${game.shopRerolls||0}|${ids}`;
-      if(hash !== lastShopHash){
-        ui.showShop(game.room, game.player.force||0, stock, game.getShopRerollCost(), game.roomIsBoss);
-        lastShopHash = hash;
-      }else{
-        ui.show("shop");
-      }
-    }
-
-    refreshHUD();
-  }
+  scenes.update(dt);
+  scenes.render(dt);
 
   bgm.update(game);
 
@@ -323,18 +299,3 @@ function frame(now){
 
 requestAnimationFrame(frame);
 
-// Enter to start/resume
-window.addEventListener("keydown", (e) => {
-  if(e.code === "Enter"){
-    if(game.state === "title" || game.state === "gameover"){
-      unlockAudioOnce();
-      ui.hide();
-      game.start(ui.getFocusModeId ? ui.getFocusModeId() : "chrono");
-    }else if(game.state === "paused"){
-      ui.hide();
-      game.resume();
-    }
-  }else{
-    if(!ui.muted) sfx.ensure();
-  }
-}, {passive:true});

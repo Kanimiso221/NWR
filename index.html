@@ -10,35 +10,30 @@
   <canvas id="game" aria-label="NEON WARDS canvas"></canvas>
 
   <div id="hud" aria-live="polite">
-    <div class="row">
-      <div class="meter">
-        <span>HP</span>
+    <div class="hudBars">
+      <div class="meter hp">
+        <div class="labelRow"><span class="label">HP</span><span id="hpText" class="value">0/0</span></div>
         <div class="bar"><div id="hpBar"></div></div>
       </div>
-      <div class="meter">
-        <span>FOCUS</span>
+      <div class="meter focus">
+        <div class="labelRow"><span class="label">FOCUS</span><span id="focusText" class="value">0/0</span></div>
         <div class="bar"><div id="focusBar"></div></div>
       </div>
     </div>
 
-    <div class="row small">
-      <div>
-        Room: <span id="room">1</span>
-        &nbsp;|&nbsp; Score: <span id="score">0</span>
-        &nbsp;|&nbsp; FORCE: <span id="force">0</span>
-        <span id="combo"></span>
-      </div>
-      <div>
-        Best: <span id="best">0</span>
+    <div class="hudMeta">
+      <div class="hudChips">
+        <span class="hudChip">R<span id="room">1</span></span>
+        <span class="hudChip">SCORE <span id="score">0</span></span>
+        <span class="hudChip">FORCE <span id="force">0</span></span>
+        <span id="combo" class="hudCombo"></span>
       </div>
     </div>
 
-    <div class="row tiny">
-      <div id="build">Build: -</div>
-    </div>
-
-    <div class="row tiny">
-      <div id="stageLine" style="display:none">
+    <div id="hudDebug" class="hudDebug">
+      <div class="hudDebugRow">Best: <span id="best">0</span></div>
+      <div class="hudDebugRow" id="build">Build: -</div>
+      <div class="hudDebugRow" id="stageLine" style="display:none">
         <span id="mapName"></span>
         <span class="sep"> • </span>
         <span id="mapGimmick"></span>
@@ -48,23 +43,29 @@
 
   <div id="overlay" class="show">
     <div class="panel">
-      <h1>NEON WARDS: ROGUELITE</h1>
+      <div class="panelHeader">
+        <div class="brand">
+          <div class="brandTitle">NEON WARDS</div>
+          <div class="brandSub">ROGUELITE</div>
+        </div>
+        <button id="settingsBtn" class="iconBtn" type="button" aria-label="Settings" title="Settings">⚙</button>
+      </div>
 
       <div class="modeRow">
         <div id="modeBadge" class="modeBadge">TITLE</div>
         <div id="modeStats" class="modeStats"></div>
       </div>
       <p class="desc" id="overlayDesc">
-        WASDで移動。マウスで照準、クリックで射撃。
-        Shiftで瞬間ダッシュ(移動方向優先)。SpaceでFOCUS: 選んだ能力を発動。
-        部屋をクリアすると強化をクリックで選択。Eは強化で解禁されるスキル。
+        WASD:移動 / マウス:照準 / クリック:射撃<br>
+        Shift:ダッシュ / Space:FOCUS / Esc:ポーズ<br>
+        部屋クリアでアップグレードを1つ選ぶ。
       </p>
 
       <div id="focusSelectArea" class="focusSelectArea">
         <div class="focusTitle">FOCUS MODE</div>
         <div id="focusCards" class="focusCards"></div>
         <div id="focusDetail" class="focusDetail"></div>
-        <p class="tiny focusHint">クリックで選択。1〜8でも可。Spaceで発動。</p>
+        <p class="tiny focusHint">クリック or 1〜8で選択。Spaceで発動。</p>
       </div>
 
       <div id="rewardArea" class="hidden">
@@ -93,7 +94,9 @@
         <button id="restartBtn" class="hidden">RESTART</button>
       </div>
 
-      <div class="opts">
+      <div class="settingsPanel" id="settingsPanel" aria-label="Settings">
+        <div class="settingsTitle">SETTINGS</div>
+        <div class="opts">
   <div id="audioOpts" class="audioOpts">
     <label class="optLine"><input type="checkbox" id="muteChk" /> Mute</label>
 

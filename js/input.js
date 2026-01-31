@@ -6,6 +6,10 @@ export class Input {
     this.keysDown = new Set();
     this.keysPressed = new Set();
 
+    // When locked, input reports "no keys" and clears buffered presses.
+    // Used during scene fade transitions to avoid accidental actions.
+    this.locked = false;
+
     this.mouse = {
       x: 0, y: 0,
       down: false,
@@ -76,9 +80,29 @@ export class Input {
     window.addEventListener("touchend", () => { this.mouse.down = false; });
   }
 
-  isDown(code){ return this.keysDown.has(code); }
+  setLocked(v){
+    const nv = !!v;
+    if(nv && !this.locked){
+      // flush any buffered actions so they can't trigger right after unlock
+      this.keysDown.clear();
+      this.keysPressed.clear();
+      this.mouse.down = false;
+      this.mouse.pressed = false;
+    }
+    this.locked = nv;
+  }
+
+  isDown(code){
+    if(this.locked) return false;
+    return this.keysDown.has(code);
+  }
 
   consumePressed(code){
+    if(this.locked){
+      // don't buffer presses while locked
+      this.keysPressed.delete(code);
+      return false;
+    }
     if(this.keysPressed.has(code)){
       this.keysPressed.delete(code);
       return true;
@@ -87,12 +111,17 @@ export class Input {
   }
 
   consumeMousePressed(){
+    if(this.locked){
+      this.mouse.pressed = false;
+      return false;
+    }
     const p = this.mouse.pressed;
     this.mouse.pressed = false;
     return p;
   }
 
   getMoveVector(){
+    if(this.locked) return v2(0, 0);
     const left = this.isDown("KeyA");
     const right = this.isDown("KeyD");
     const up = this.isDown("KeyW");

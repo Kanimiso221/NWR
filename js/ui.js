@@ -24,6 +24,8 @@ export class UI {
 
     this.hpBar = document.getElementById("hpBar");
     this.focusBar = document.getElementById("focusBar");
+    this.hpText = document.getElementById("hpText");
+    this.focusText = document.getElementById("focusText");
     this.scoreEl = document.getElementById("score");
     this.comboEl = document.getElementById("combo");
     this.bestEl = document.getElementById("best");
@@ -33,6 +35,38 @@ export class UI {
     this.stageLineEl = document.getElementById("stageLine");
     this.forceEl = document.getElementById("force");
     this.buildEl = document.getElementById("build");
+
+	    // Settings panel toggle (audio + motion). UI-only; gameplay unaffected.
+	    this.settingsBtn = document.getElementById("settingsBtn");
+	    this.settingsPanel = document.getElementById("settingsPanel");
+	    this._settingsOpen = (this._safeGet("nw_settingsOpen") === "1");
+	    this._applySettingsOpen();
+
+    // HUD debug toggle: hide noisy info (build/map/best) by default.
+    // Press F1 to toggle (stored in localStorage).
+    this._debugHud = (this._safeGet("nw_debugHud") === "1");
+    this._applyDebugHudClass();
+
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (e && e.code === "F1") {
+          e.preventDefault();
+          this._debugHud = !this._debugHud;
+          this._safeSet("nw_debugHud", this._debugHud ? "1" : "0");
+          this._applyDebugHudClass();
+        }
+      },
+      { passive: false }
+    );
+
+	    // Settings panel toggle
+	    if(this.settingsBtn && this.settingsPanel){
+	      this.settingsBtn.addEventListener("click", (e)=>{
+	        if(e) e.preventDefault();
+	        this.setSettingsOpen(!this._settingsOpen);
+	      });
+	    }
 
     this.muteChk = document.getElementById("muteChk");
     this.motionChk = document.getElementById("motionChk");
@@ -126,7 +160,7 @@ export class UI {
   // HUD
   // ------------------------------
   setBest(v){
-    this.bestEl.textContent = String(v|0);
+    if(this.bestEl) this.bestEl.textContent = String(v|0);
   }
 
   updateHUD({hp, hpMax, focus, focusMax, score, combo, room, force, buildText, mapName, mapGimmick, roomTitle}){
@@ -135,9 +169,22 @@ export class UI {
     this.hpBar.style.transform = `scaleX(${hpT})`;
     this.focusBar.style.transform = `scaleX(${fT})`;
 
+    // numeric meters (current / max)
+    if(this.hpText){
+      const hi = Math.max(0, Math.min(Math.round(hp), Math.round(hpMax || 0)));
+      const hm = Math.max(1, Math.round(hpMax || 0));
+      this.hpText.textContent = `${hi}/${hm}`;
+    }
+    if(this.focusText){
+      const fi = Math.max(0, Math.min(Math.round(focus), Math.round(focusMax || 0)));
+      const fm = Math.max(1, Math.round(focusMax || 0));
+      this.focusText.textContent = `${fi}/${fm}`;
+    }
+
     this.scoreEl.textContent = String(score|0);
-    this.comboEl.textContent = combo > 1 ? ` x${combo}` : "";
-    this.roomEl.textContent = String(room|0);
+    const c = Number(combo);
+    this.comboEl.textContent = (c > 1) ? `COMBO x${c.toFixed(1)}` : "";
+    if(this.roomEl) this.roomEl.textContent = String(room|0);
 
     if(this.mapNameEl) this.mapNameEl.textContent = mapName || "";
     if(this.mapGimmickEl) {
@@ -148,7 +195,7 @@ export class UI {
     }
     if(this.stageLineEl) this.stageLineEl.style.display = (mapName || mapGimmick || roomTitle) ? "" : "none";
     if(this.forceEl) this.forceEl.textContent = String(force|0);
-    this.buildEl.textContent = buildText || "Build: -";
+    if(this.buildEl) this.buildEl.textContent = buildText || "Build: -";
   }
 
   // ------------------------------
@@ -157,6 +204,12 @@ export class UI {
   show(mode){
     this._mode = mode;
     this.overlay.classList.add("show");
+
+    // Enable scene-specific CSS (panel accent, background tint, etc.)
+    try{
+      this.overlay.dataset.mode = String(mode || "");
+      document.body.dataset.scene = String(mode || "");
+    }catch(e){}
 
     const isTitle = mode === "title";
     const isPause = mode === "pause";
@@ -189,6 +242,12 @@ export class UI {
   hide(){
     this._mode = "hidden";
     this.overlay.classList.remove("show");
+
+    // Back to gameplay styling
+    try{
+      this.overlay.dataset.mode = "";
+      document.body.dataset.scene = "run";
+    }catch(e){}
     this.menuButtons.classList.remove("hidden");
     this.rewardArea.classList.add("hidden");
     if(this.shopArea) this.shopArea.classList.add("hidden");
@@ -525,6 +584,12 @@ export class UI {
   _safeSet(key, val){
     try{ localStorage.setItem(key, String(val)); }catch(_e){}
   }
+
+  _applyDebugHudClass(){
+    try{
+      document.body.classList.toggle("debugHud", !!this._debugHud);
+    }catch(_e){}
+  }
   // ------------------------------
   // Internal helpers
   // ------------------------------
@@ -538,11 +603,25 @@ export class UI {
       || null;
   }
 
+	setSettingsOpen(open, persist=true){
+		this._settingsOpen = !!open;
+		if(persist) this._safeSet("nw_settingsOpen", this._settingsOpen ? "1" : "0");
+		this._applySettingsOpen();
+	}
+
+	_applySettingsOpen(){
+		if(this.settingsPanel) this.settingsPanel.classList.toggle("open", !!this._settingsOpen);
+		if(this.settingsBtn) this.settingsBtn.classList.toggle("active", !!this._settingsOpen);
+	}
+
   _setAudioVisible(visible){
     // Hide mute + BGM/SFX slider blocks; keep Reduced motion visible.
     if(this._muteLabel) this._muteLabel.classList.toggle("hidden", !visible);
     if(this._bgmBlock) this._bgmBlock.classList.toggle("hidden", !visible);
     if(this._sfxBlock) this._sfxBlock.classList.toggle("hidden", !visible);
+	  if(this.settingsBtn) this.settingsBtn.classList.toggle("hidden", !visible);
+	  if(this.settingsPanel) this.settingsPanel.classList.toggle("hidden", !visible);
+	  if(!visible) this.setSettingsOpen(false, false);
   }
 
   _wireVolumeSlider(sliderEl, pctEl, emit){
