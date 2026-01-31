@@ -1,4 +1,5 @@
 import { clamp, lerp } from "./math.js";
+import { getFocusMode } from "./focus_modes.js";
 
 export function clear(ctx, w, h){
   ctx.clearRect(0,0,w,h);
@@ -609,6 +610,73 @@ export function drawPlayer(ctx, p, camera, reducedMotion=false){
 
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
+
+  // FOCUS field overlays (range indicators)
+  // We draw these in renderer (not particles) so the radius is always readable.
+  if(p && p.focusActive){
+    const fm = getFocusMode(p.focusModeId || "chrono");
+    const tt = (p.t !== undefined ? p.t : 0);
+    const pulse = 0.60 + 0.40 * Math.sin(tt * 3.1);
+    const frac = clamp((p.focus || 0) / Math.max(1e-6, (p.focusMax || 1)), 0, 1);
+
+    const ring = (r, style, alphaMul=1, dash=null, w=3) => {
+      if(!r || r <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = (0.10 + 0.16 * pulse) * alphaMul * lerp(0.55, 1.0, frac);
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = style;
+      ctx.strokeStyle = style;
+      ctx.lineWidth = w;
+      if(dash) ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
+
+    if(fm){
+      // Bullet interaction radii
+      if(fm.repelBullets){
+        const rr = fm.repelBullets.radius ?? 220;
+        ring(rr, "rgba(170, 210, 255, 0.55)", 1.0, [10, 8], 3);
+      }
+      if(fm.reflectBullets){
+        const inner = fm.reflectBullets.inner ?? 140;
+        ring(inner, "rgba(255, 255, 255, 0.55)", 0.95, [4, 6], 2);
+      }
+
+      // Hard deny bubble (enemies can't enter)
+      if(fm.denyRadius){
+        ring(fm.denyRadius, "rgba(255, 245, 210, 0.65)", 1.05, null, 3);
+      }
+
+      // AEGIS close barrier (absorbs bullets)
+      if(fm.shield){
+        const sr = fm.shield.radius ?? 150;
+        ring(sr, "rgba(120, 255, 220, 0.60)", 1.1, null, 4);
+      }
+
+      // Enemy interaction (repel / drag)
+      if(fm.repelEnemies){
+        const er = fm.repelEnemies.radius ?? 180;
+        ring(er, "rgba(255, 200, 255, 0.45)", 0.85, [16, 10], 2);
+      } else if(fm.dragEnemies && fm.dragEnemies.radius){
+        ring(fm.dragEnemies.radius, "rgba(255, 200, 255, 0.40)", 0.70, [16, 10], 2);
+      }
+
+      // SEEKER: show homing radius subtly (helps aiming expectations)
+      if(fm.homing && fm.homing.radius){
+        ring(fm.homing.radius, "rgba(220, 220, 255, 0.30)", 0.55, [6, 10], 2);
+      }
+
+      // NOVA: pulse radius (instant effect range)
+      if(fm.pulse && fm.pulse.radius){
+        ring(fm.pulse.radius, "rgba(255, 255, 255, 0.25)", 0.50, [2, 10], 2);
+      }
+    }
+  }
+
 
   const inv = p.invuln > 0 ? (p.invuln / 0.22) : 0;
   ctx.shadowBlur = 28;

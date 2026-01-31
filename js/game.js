@@ -1453,69 +1453,9 @@ for(const e of this.enemies){
           }
         }
 
-        // REPULSOR / AEGIS: deflect (and sometimes reflect) enemy bullets away from the player
-        if (b.team === "enemy" && fm.repelBullets) {
-          const rr = fm.repelBullets.radius ?? 210;
-          const str = fm.repelBullets.strength ?? 5200; // bend strength
-          const dx = b.x - this.player.x;
-          const dy = b.y - this.player.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < rr * rr) {
-            const d = Math.sqrt(d2) || 1;
-            const t = 1 - d / rr; // 0..1
-            const nx = dx / d;
-            const ny = dy / d;
 
-            // If this mode supports reflection, flip bullets in the inner core.
-            if (fm.reflectBullets) {
-              const inner = fm.reflectBullets.inner ?? (rr * 0.55);
-              if (d < inner) {
-                const sp = Math.hypot(b.vx, b.vy) || 1;
-                const spMul = fm.reflectBullets.speedMul ?? 1.05;
-                const dmgMul = fm.reflectBullets.damageMul ?? 0.75;
+        // REPULSOR / AEGIS: bullet fields are handled post-update (CCD) for reliability.
 
-                b.team = "player";
-                b.damage *= dmgMul;
-                b.pierce = 0;
-
-                // send it outward (clear, readable reflection)
-                b.vx = nx * sp * spMul;
-                b.vy = ny * sp * spMul;
-
-                // nudge out so it doesn't immediately collide again
-                b.x = this.player.x + nx * (inner + b.r + 6);
-                b.y = this.player.y + ny * (inner + b.r + 6);
-
-                const n = reducedMotion ? 5 : 10;
-                this.particles.burst({ x: b.x, y: b.y }, n, { speedMin: 120, speedMax: 520, lifeMin: 0.06, lifeMax: 0.20, glow: 20 });
-              }
-            }
-
-            // If it wasn't reflected, bend outward so it visibly "bounces away".
-            if (b.team === "enemy") {
-              const sp = Math.hypot(b.vx, b.vy) || 1;
-              const vx = b.vx / sp;
-              const vy = b.vy / sp;
-
-              // str≈12000 => strong bend near the core.
-              const blend = clamp(t * (str / 12000), 0, 0.92);
-
-              let ndx = vx + (nx - vx) * blend;
-              let ndy = vy + (ny - vy) * blend;
-              const nn = Math.hypot(ndx, ndy) || 1;
-
-              b.vx = (ndx / nn) * sp;
-              b.vy = (ndy / nn) * sp;
-
-              // If a bullet clips into the core, shove it outward so it can't "ghost hit" the player.
-              const minD = this.player.r + b.r + 8;
-              if (d < minD) {
-                b.x = this.player.x + nx * minD;
-                b.y = this.player.y + ny * minD;
-              }
-            }
-          }
-        }
       }
 
       // stage fields can influence bullet trajectories
@@ -1565,27 +1505,103 @@ for(const e of this.enemies){
 
       }
 
-      const px = b.x;
-      const py = b.y;
-      b._px = px;
-      b._py = py;
+      b._px = b.x;
+      b._py = b.y;
       b.update(dtWorld);
+      // FOCUS defensive fields vs enemy bullets (AEGIS / REPULSOR), with CCD so fast bullets can't slip through.
+      if(!b.dead && this._focusActive && this._focusMode && b.team === "enemy"){
+        const fm = this._focusMode;
+        const px = this.player.x;
+        const py = this.player.y;
+        const bx0 = (b._px !== undefined) ? b._px : b.x;
+        const by0 = (b._py !== undefined) ? b._py : b.y;
+        const bx1 = b.x;
+        const by1 = b.y;
 
-      // AEGIS: absorb enemy bullets with a close-range barrier (not just "repel")
-      if(!b.dead && this._focusActive && this._focusMode && this._focusMode.shield && b.team === "enemy"){
-        const sr = this._focusMode.shield.radius ?? 150;
-        const dx = b.x - this.player.x;
-        const dy = b.y - this.player.y;
-        const rr = sr + b.r;
-        if(dx*dx + dy*dy < rr*rr){
-          b.age = b.life; // mark as dead (dead is a getter)
+        // AEGIS: absorb bullets that cross the shield radius
+        if(fm.shield){
+          const sr = (fm.shield.radius != null) ? fm.shield.radius : 160;
+          const hit = segCircleTOI(bx0, by0, bx1, by1, px, py, sr + b.r);
+          if(hit !== null){
+            const hx = bx0 + (bx1 - bx0) * hit;
+            const hy = by0 + (by1 - by0) * hit;
 
-          const n = reducedMotion ? 6 : 14;
-          this.particles.burst({ x: b.x, y: b.y }, n, { speedMin: 140, speedMax: 620, lifeMin: 0.06, lifeMax: 0.24, glow: 20 });
+            b.age = b.life; // mark as dead (dead is a getter)
+
+            const n = reducedMotion ? 6 : 14;
+            this.particles.burst({ x: hx, y: hy }, n, { speedMin: 140, speedMax: 620, lifeMin: 0.06, lifeMax: 0.24, glow: 20 });
+          }
+        }
+
+        // REPULSOR: bend bullets away, and optionally reflect them in an inner core.
+        if(!b.dead && fm.repelBullets){
+          const rr = (fm.repelBullets.radius != null) ? fm.repelBullets.radius : 260;
+          const hit = segCircleTOI(bx0, by0, bx1, by1, px, py, rr + b.r);
+          if(hit !== null){
+            const hx = bx0 + (bx1 - bx0) * hit;
+            const hy = by0 + (by1 - by0) * hit;
+
+            const dx = hx - px;
+            const dy = hy - py;
+            const d = Math.hypot(dx, dy) || 1;
+            const nx = dx / d;
+            const ny = dy / d;
+
+            // reflect first (if supported)
+            if(fm.reflectBullets){
+              const inner = (fm.reflectBullets.inner != null) ? fm.reflectBullets.inner : (rr * 0.55);
+              const hitIn = segCircleTOI(bx0, by0, bx1, by1, px, py, inner + b.r);
+              if(hitIn !== null){
+                const sp = Math.hypot(b.vx, b.vy) || 1;
+                const spMul = (fm.reflectBullets.speedMul != null) ? fm.reflectBullets.speedMul : 1.05;
+                const dmgMul = (fm.reflectBullets.damageMul != null) ? fm.reflectBullets.damageMul : 0.75;
+
+                b.team = "player";
+                b.damage *= dmgMul;
+                b.pierce = 0;
+
+                // send it outward (clear, readable reflection)
+                b.vx = nx * sp * spMul;
+                b.vy = ny * sp * spMul;
+
+                // nudge out so it doesn't immediately collide again
+                b.x = px + nx * (inner + b.r + 6);
+                b.y = py + ny * (inner + b.r + 6);
+
+                const n = reducedMotion ? 6 : 12;
+                this.particles.burst({ x: b.x, y: b.y }, n, { speedMin: 120, speedMax: 520, lifeMin: 0.06, lifeMax: 0.20, glow: 20 });
+              }
+            }
+
+            // if it wasn't reflected, bend outward and push it out of the bubble
+            if(b.team === "enemy"){
+              const sp = Math.hypot(b.vx, b.vy) || 1;
+              const vx = b.vx / sp;
+              const vy = b.vy / sp;
+
+              const t = clamp(1 - d / rr, 0, 1); // 0..1
+              const str = (fm.repelBullets.strength != null) ? fm.repelBullets.strength : 5200;
+
+              // stronger near center, clamped to avoid 180-degree flips
+              const blend = clamp(t * (str / 12000), 0, 0.92);
+
+              let ndx = vx + (nx - vx) * blend;
+              let ndy = vy + (ny - vy) * blend;
+              const nn = Math.hypot(ndx, ndy) || 1;
+
+              b.vx = (ndx / nn) * sp;
+              b.vy = (ndy / nn) * sp;
+
+              // shove it just outside the boundary so it can't "ghost hit" the player
+              const outD = rr + b.r + 6;
+              b.x = px + nx * outD;
+              b.y = py + ny * outD;
+            }
+          }
         }
       }
 
-      if (b.dead) {
+if (b.dead) {
         if (b.explodeR > 0) {
           this._explodeAt(b.x, b.y, b.team, b.damage, b.explodeR, b.explodeFalloff, reducedMotion);
         }

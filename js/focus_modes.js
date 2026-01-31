@@ -158,7 +158,7 @@ export const FOCUS_MODES = [
     dmgMul: 0.92,
     spreadMul: 1.00,
     // enemy deny + drag near core (implemented in game.js enemy update)
-    denyRadius: 88,
+    denyRadius: 140,
     drag: 8.5,
     repelEnemies: { radius: 230, strength: 8200 },
     repelBullets: { radius: 270, strength: 15000 },
