@@ -111,6 +111,14 @@ export class UI {
     this._onBgmVol = null;
     this._onSfxVol = null;
 
+    // Multiplayer (lobby) hooks
+    this._onMpHost = null;
+    this._onMpJoin = null;
+    this._onMpLeave = null;
+    this._onMpReady = null;
+    this._onMpServerChange = null;
+    this._onMpNameChange = null;
+
     // Internal cached values (avoid NaN -> silence if sliders are missing)
     this._bgmVal = this.bgmVol ? this._readSlider01(this.bgmVol) : 0.35;
     this._sfxVal = this.sfxVol ? this._readSlider01(this.sfxVol) : 1.0;
@@ -131,6 +139,24 @@ export class UI {
       || defaultFocusModeId();
     this._ensureFocusUI();
     this.setSelectedFocusModeId(this._focusModeId, true);
+
+    // Multiplayer UI (title/gameover)
+    this._mpView = {
+      server: this._safeGet("nw_lobbyServer") || "https://nwr-lobby.kasuteranight.workers.dev",
+      name: this._safeGet("nw_playerName") || "",
+      connecting: false,
+      connected: false,
+      roomCode: "",
+      selfId: "",
+      hostId: "",
+      isHost: false,
+      ready: false,
+      members: [],
+      error: "",
+    };
+    this._ensureMultiplayerUI();
+    this._wireMultiplayerUI();
+    this.setMultiplayerState(this._mpView);
     // Wire optional sliders if present (realtime while dragging)
     this._wireVolumeSlider(this.bgmVol, this.bgmPct, (v) => {
       this._bgmVal = v;
@@ -231,6 +257,11 @@ export class UI {
     if(this.focusArea){
       const showFocus = isTitle || isOver;
       this.focusArea.classList.toggle("hidden", !showFocus);
+    }
+
+    if(this.mpArea){
+      const showMp = isTitle || isOver;
+      this.mpArea.classList.toggle("hidden", !showMp);
     }
 
 
@@ -576,6 +607,312 @@ export class UI {
         }
       }, {passive:false});
     }
+  }
+
+  // ------------------------------
+  // Multiplayer (Lobby)
+  // ------------------------------
+  onMpHost(fn){ this._onMpHost = fn; }
+  onMpJoin(fn){ this._onMpJoin = fn; }
+  onMpLeave(fn){ this._onMpLeave = fn; }
+  onMpReady(fn){ this._onMpReady = fn; }
+  onMpServerChange(fn){ this._onMpServerChange = fn; }
+  onMpNameChange(fn){ this._onMpNameChange = fn; }
+
+  getMpServer(){
+    return String(this.mpServerEl?.value || this._mpView.server || "").trim();
+  }
+  getMpRoomCode(){
+    return String(this.mpRoomEl?.value || "").trim().toUpperCase();
+  }
+  getMpName(){
+    return String(this.mpNameEl?.value || this._mpView.name || "").trim();
+  }
+
+  setMultiplayerState(view={}){
+    // Merge
+    this._mpView = Object.assign({}, this._mpView || {}, view || {});
+
+    if(this.mpServerEl){
+      const sv = String(this._mpView.server || "");
+      if(this.mpServerEl.value !== sv) this.mpServerEl.value = sv;
+    }
+    if(this.mpNameEl){
+      const nv = String(this._mpView.name || "");
+      if(this.mpNameEl.value !== nv) this.mpNameEl.value = nv;
+    }
+
+    const connecting = !!this._mpView.connecting;
+    const connected = !!this._mpView.connected;
+    const isHost = !!this._mpView.isHost;
+    const room = String(this._mpView.roomCode || "").trim().toUpperCase();
+    const selfId = String(this._mpView.selfId || "");
+    const hostId = String(this._mpView.hostId || "");
+    const members = Array.isArray(this._mpView.members) ? this._mpView.members : [];
+    const ready = !!this._mpView.ready;
+    const err = String(this._mpView.error || "");
+
+    // Pill
+    if(this.mpPillEl){
+      let label = "OFFLINE";
+      let cls = "state-off";
+      if(connecting){ label = "CONNECTING"; cls = "state-connecting"; }
+      else if(connected){ label = isHost ? "HOST" : "CLIENT"; cls = isHost ? "state-host" : "state-client"; }
+      this.mpPillEl.textContent = label;
+      this.mpPillEl.classList.remove("state-off","state-connecting","state-host","state-client");
+      this.mpPillEl.classList.add(cls);
+    }
+
+    // Buttons enabled
+    const serverOk = !!this.getMpServer();
+    if(this.mpHostBtn){ this.mpHostBtn.disabled = connecting || connected || !serverOk; }
+    if(this.mpJoinBtn){ this.mpJoinBtn.disabled = connecting || connected || !serverOk || !this.getMpRoomCode(); }
+    if(this.mpRoomEl){ this.mpRoomEl.disabled = connecting || connected || !serverOk; }
+    if(this.mpLeaveBtn){ this.mpLeaveBtn.disabled = !connecting && !connected; }
+    if(this.mpReadyBtn){ this.mpReadyBtn.disabled = !connected; }
+
+    // Room row
+    if(this.mpRoomRowEl){
+      const show = connecting || connected;
+      this.mpRoomRowEl.classList.toggle("hidden", !show);
+    }
+    if(this.mpRoomLabelEl){
+      this.mpRoomLabelEl.textContent = room || "-----";
+    }
+    if(this.mpCopyBtn){
+      this.mpCopyBtn.disabled = !room;
+    }
+
+    // Ready button label
+    if(this.mpReadyBtn){
+      this.mpReadyBtn.textContent = ready ? "READY ✓" : "READY";
+      this.mpReadyBtn.classList.toggle("on", ready);
+    }
+
+    // Players list
+    if(this.mpPlayersEl){
+      if(!connected){
+        this.mpPlayersEl.innerHTML = "";
+      }else{
+        const lines = members.map((m) => {
+          const nm = String(m.name || "Player");
+          const r = !!m.ready;
+          const isH = (hostId && m.id) ? (m.id === hostId) : !!m.host;
+          const you = (selfId && m.id) ? (m.id === selfId) : false;
+          const tag = isH ? "HOST" : (you ? "YOU" : "");
+          const rr = r ? "✓" : "·";
+          return `<div class="mpPl ${you ? "me" : ""}">
+            <span class="mpDot ${r ? "ok" : "no"}">${rr}</span>
+            <span class="mpName">${this._escapeHtml(nm)}</span>
+            ${tag ? `<span class="mpTag">${tag}</span>` : ""}
+          </div>`;
+        }).join("");
+        this.mpPlayersEl.innerHTML = lines;
+      }
+    }
+
+    // Status line
+    if(this.mpStatusEl){
+      if(err){
+        this.mpStatusEl.textContent = err;
+      }else if(connecting){
+        this.mpStatusEl.textContent = "Connecting...";
+      }else if(connected){
+        if(isHost){
+          const allReady = members.length ? members.every(m => !!m.ready) : true;
+          this.mpStatusEl.textContent = allReady ? "All ready. Press START." : "Waiting for READY...";
+        }else{
+          this.mpStatusEl.textContent = "Waiting for host...";
+        }
+      }else{
+        this.mpStatusEl.textContent = "";
+      }
+    }
+
+    // Start button behavior
+    if(this.startBtn){
+      if(connected){
+        if(isHost){
+          const allReady = members.length ? members.every(m => !!m.ready) : true;
+          this.startBtn.textContent = "START (HOST)";
+          this.startBtn.disabled = !allReady;
+        }else{
+          this.startBtn.textContent = "WAITING HOST";
+          this.startBtn.disabled = true;
+        }
+      }else{
+        this.startBtn.textContent = "START";
+        this.startBtn.disabled = false;
+      }
+    }
+  }
+
+  _ensureMultiplayerUI(){
+    const panel = this.overlay?.querySelector?.(".panel") || this.overlay;
+    const before = document.getElementById("menuButtons") || null;
+
+    this.mpArea = document.getElementById("mpArea") || null;
+    if(!this.mpArea){
+      const area = document.createElement("div");
+      area.id = "mpArea";
+      area.className = "mpArea";
+      area.innerHTML = `
+        <div class="mpHeader">
+          <div class="mpTitle">MULTIPLAYER <span class="mini">(BETA)</span></div>
+          <div id="mpPill" class="mpPill state-off">OFFLINE</div>
+        </div>
+
+        <div class="mpGrid">
+          <label class="mpLine">
+            <span class="mpLabel">Server</span>
+            <input id="mpServer" class="mpInput" placeholder="wss://your-worker.workers.dev" />
+          </label>
+          <label class="mpLine">
+            <span class="mpLabel">Name</span>
+            <input id="mpName" class="mpInput" placeholder="Player" />
+          </label>
+
+          <div class="mpRow">
+            <button id="mpHostBtn" class="mpBtn" type="button">HOST</button>
+            <input id="mpRoom" class="mpInput mpRoom" placeholder="ROOM CODE" />
+            <button id="mpJoinBtn" class="mpBtn" type="button">JOIN</button>
+          </div>
+
+          <div id="mpRoomRow" class="mpRoomRow hidden">
+            <div class="mpRoomLabel">ROOM: <span id="mpRoomLabel">-----</span></div>
+            <div class="mpRoomBtns">
+              <button id="mpCopyBtn" class="mpBtn" type="button">COPY</button>
+              <button id="mpLeaveBtn" class="mpBtn" type="button">LEAVE</button>
+            </div>
+          </div>
+
+          <div id="mpPlayers" class="mpPlayers"></div>
+
+          <div class="mpBottom">
+            <button id="mpReadyBtn" class="mpBtn" type="button">READY</button>
+            <div id="mpStatus" class="mpStatus"></div>
+          </div>
+        </div>
+        <p class="tiny mpHint">サーバURLを入れて HOST で部屋作成。JOIN はコード入力。準備できたら READY。ホストが START。
+        </p>
+      `;
+
+      if(before && before.parentElement === panel){
+        panel.insertBefore(area, before);
+      }else{
+        panel.appendChild(area);
+      }
+      this.mpArea = area;
+    }
+
+    // Bind elements
+    this.mpServerEl = document.getElementById("mpServer") || null;
+    this.mpNameEl = document.getElementById("mpName") || null;
+    this.mpHostBtn = document.getElementById("mpHostBtn") || null;
+    this.mpJoinBtn = document.getElementById("mpJoinBtn") || null;
+    this.mpRoomEl = document.getElementById("mpRoom") || document.getElementById("mpRoom") || null;
+    // We used id="mpRoom" above
+    if(!this.mpRoomEl) this.mpRoomEl = document.getElementById("mpRoom");
+    this.mpPillEl = document.getElementById("mpPill") || null;
+    this.mpRoomRowEl = document.getElementById("mpRoomRow") || null;
+    this.mpRoomLabelEl = document.getElementById("mpRoomLabel") || null;
+    this.mpCopyBtn = document.getElementById("mpCopyBtn") || null;
+    this.mpLeaveBtn = document.getElementById("mpLeaveBtn") || null;
+    this.mpPlayersEl = document.getElementById("mpPlayers") || null;
+    this.mpReadyBtn = document.getElementById("mpReadyBtn") || null;
+    this.mpStatusEl = document.getElementById("mpStatus") || null;
+
+    // Initial values
+    if(this.mpServerEl) this.mpServerEl.value = String(this._mpView.server || "");
+    if(this.mpNameEl) this.mpNameEl.value = String(this._mpView.name || "");
+  }
+
+  _wireMultiplayerUI(){
+    if(this.mpServerEl){
+      const onChange = () => {
+        const v = String(this.mpServerEl.value || "").trim();
+        this._mpView.server = v;
+        this._safeSet("nw_lobbyServer", v);
+        if(this._onMpServerChange) this._onMpServerChange(v);
+        this.setMultiplayerState(this._mpView);
+      };
+      this.mpServerEl.addEventListener("change", onChange);
+      this.mpServerEl.addEventListener("input", () => {
+        // light refresh without spamming callbacks
+        this._mpView.server = String(this.mpServerEl.value || "").trim();
+        this.setMultiplayerState(this._mpView);
+      });
+    }
+
+    if(this.mpNameEl){
+      const onChange = () => {
+        const v = String(this.mpNameEl.value || "").trim();
+        this._mpView.name = v;
+        this._safeSet("nw_playerName", v);
+        if(this._onMpNameChange) this._onMpNameChange(v);
+      };
+      this.mpNameEl.addEventListener("change", onChange);
+    }
+
+    if(this.mpRoomEl){
+      this.mpRoomEl.addEventListener("input", () => {
+        this.setMultiplayerState(this._mpView);
+      });
+      this.mpRoomEl.addEventListener("keydown", (e) => {
+        if(e.key === "Enter"){
+          e.preventDefault();
+          if(this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
+        }
+      });
+    }
+
+    this.mpHostBtn?.addEventListener("click", () => {
+      if(this._onMpHost) this._onMpHost();
+    });
+    this.mpJoinBtn?.addEventListener("click", () => {
+      if(this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
+    });
+    this.mpLeaveBtn?.addEventListener("click", () => {
+      if(this._onMpLeave) this._onMpLeave();
+    });
+    this.mpReadyBtn?.addEventListener("click", () => {
+      if(this._onMpReady) this._onMpReady();
+    });
+    this.mpCopyBtn?.addEventListener("click", async () => {
+      const code = String(this._mpView.roomCode || "").trim();
+      if(!code) return;
+      const text = code;
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(text);
+        }else{
+          // fallback
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        if(this.mpStatusEl) this.mpStatusEl.textContent = "Copied.";
+        setTimeout(() => {
+          if(this.mpStatusEl && this.mpStatusEl.textContent === "Copied.") this.mpStatusEl.textContent = "";
+        }, 900);
+      }catch(_){
+        if(this.mpStatusEl) this.mpStatusEl.textContent = "Copy failed.";
+      }
+    });
+  }
+
+  _escapeHtml(s){
+    return String(s || "").replace(/[&<>\"']/g, (c) => {
+      if(c === "&") return "&amp;";
+      if(c === "<") return "&lt;";
+      if(c === ">") return "&gt;";
+      if(c === "\"") return "&quot;";
+      if(c === "'") return "&#39;";
+      return c;
+    });
   }
 
   _safeGet(key){

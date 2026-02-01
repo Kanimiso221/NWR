@@ -4,9 +4,11 @@ import { UI } from "./ui.js";
 import { Sfx } from "./audio.js";
 import { Bgm } from "./bgm.js";
 import { ParticleSystem } from "./particles.js";
+import { LobbyClient } from "./net.js";
 import { loadBest, saveBest, loadAudioSettings, saveAudioSettings } from "./storage.js";
 import { clear, drawBackground, drawRoomBounds, drawHazards, drawObstacle, drawPickup, drawBullet, drawEnemy, drawEnemyIndicators, drawPlayer, drawStagePost } from "./renderer.js";
 let scenes = null;
+let engineRef = null;
 
 // Scene system (step 1): keep Game as-is, move title/pause/reward/shop/gameover handling into scenes.
 import { SceneManager } from "./scenes/scene_manager.js";
@@ -24,6 +26,49 @@ const ui = new UI();
 const sfx = new Sfx();
 const bgm = new Bgm();
 const particles = new ParticleSystem();
+
+// Multiplayer (BETA): room lobby + start signal only (no gameplay sync yet)
+const lobby = new LobbyClient();
+
+// Wire lobby -> UI
+lobby.onState = (view) => {
+  if(ui && typeof ui.setMultiplayerState === "function") ui.setMultiplayerState(view);
+};
+lobby.onClosed = (reason) => {
+  if(ui && typeof ui.setMultiplayerState === "function") ui.setMultiplayerState({ error: String(reason || "") });
+};
+lobby.onStart = () => {
+  // Start is driven by the host, but everyone (including host) starts on this signal.
+  if(engineRef && typeof engineRef.startRun === "function") engineRef.startRun();
+};
+
+// Wire UI -> lobby
+if(ui && typeof ui.onMpServerChange === "function"){
+  ui.onMpServerChange((url) => lobby.setServer(url));
+}
+if(ui && typeof ui.onMpHost === "function"){
+  ui.onMpHost(() => {
+    lobby.setServer(ui.getMpServer ? ui.getMpServer() : "");
+    const name = ui.getMpName ? ui.getMpName() : "";
+    lobby.host(name);
+  });
+}
+if(ui && typeof ui.onMpJoin === "function"){
+  ui.onMpJoin((code) => {
+    lobby.setServer(ui.getMpServer ? ui.getMpServer() : "");
+    const name = ui.getMpName ? ui.getMpName() : "";
+    lobby.join(code, name);
+  });
+}
+if(ui && typeof ui.onMpLeave === "function"){
+  ui.onMpLeave(() => lobby.leave("leave"));
+}
+if(ui && typeof ui.onMpReady === "function"){
+  ui.onMpReady(() => lobby.toggleReady());
+}
+
+// Initial server value (from UI/localStorage)
+if(ui && typeof ui.getMpServer === "function") lobby.setServer(ui.getMpServer());
 
 const audioSettings = loadAudioSettings();
 ui.setAudioUI(audioSettings);
@@ -178,7 +223,16 @@ function renderMenuBackground(dt){
   game.time += dt * 0.6;
 }
 
-ui.onStart(() => { engine.startRun(); });
+ui.onStart(() => {
+  // If connected to a lobby: host starts (broadcast), clients wait.
+  if(lobby && lobby.connected){
+    if(lobby.isHost){
+      lobby.start();
+    }
+    return;
+  }
+  engine.startRun();
+});
 ui.onResume(() => { engine.resumeRun(); });
 ui.onRestart(() => { engine.restartRun(); });
 ui.onMuteChange(() => {
@@ -235,6 +289,8 @@ const engine = {
   resize,
   syncSize,
 };
+
+engineRef = engine;
 
 scenes = new SceneManager(engine);
 scenes.register("title", new TitleScene(engine));
