@@ -26,15 +26,13 @@ export class RewardScene {
     if (!ui || typeof ui.showReward !== "function") return;
 
     const choices = game.rewardChoices || [];
-    const names = choices.map(c => (c && c.name) ? c.name : "").join("|");
-    const key = String(game.room) + ":" + (game.roomIsBoss ? "B" : "N") + ":" + names;
+    const sig = choices.map(c => (c && (c.id || c.name)) ? String(c.id || c.name) : "").join("|");
+    const key = String(game.room) + ":" + (game.roomIsBoss ? "B" : "N") + ":" + sig;
 
-    // showReward(room, choices, isBoss=false)
+    // Only rebuild the reward UI when the set of choices changes.
     if (key !== this._lastKey) {
       this._lastKey = key;
       ui.showReward(game.room, choices, !!game.roomIsBoss);
-    } else {
-      ui.show("reward");
     }
   }
 

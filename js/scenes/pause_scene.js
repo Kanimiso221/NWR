@@ -9,8 +9,7 @@ export class PauseScene {
   }
 
   update(dt) {
-    const { input, ui } = this.engine;
-    if (ui) ui.show("pause");
+    const { input } = this.engine;
 
     // Enter also resumes (Escape is handled globally by SceneManager).
     if (input && input.consumePressed("Enter")) {

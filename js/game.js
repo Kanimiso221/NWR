@@ -5,21 +5,21 @@ import { rollShopStock, getShopRerollCost } from "./shop.js";
 import { pickStage, stagePointFx } from "./maps/index.js";
 import { getFocusMode } from "./focus_modes.js";
 
-function cloneStage(stage){
+function cloneStage(stage) {
   // pickStage returns a reference from STAGES; clone so per-room field layouts can mutate safely.
-  if(!stage) return stage;
-  try{
+  if (!stage) return stage;
+  try {
     return JSON.parse(JSON.stringify(stage));
-  }catch(e){
+  } catch (e) {
     // fallback shallow clone
-    return { ...stage, theme: { ...stage.theme }, hazards: (stage.hazards||[]).slice(), fields: { ...(stage.fields||{}) } };
+    return { ...stage, theme: { ...stage.theme }, hazards: (stage.hazards || []).slice(), fields: { ...(stage.fields || {}) } };
   }
 }
 
-function resolveStageFields(stage, world, roomNumber, rng){
-  if(!stage || !world) return;
+function resolveStageFields(stage, world, roomNumber, rng) {
+  if (!stage || !world) return;
   const layouts = stage.fieldLayouts;
-  if(!layouts) return;
+  if (!layouts) return;
 
   const hx = Math.max(1, (world.maxX - world.minX) * 0.5);
   const hy = Math.max(1, (world.maxY - world.minY) * 0.5);
@@ -29,19 +29,19 @@ function resolveStageFields(stage, world, roomNumber, rng){
   const jitter = ((stage && stage.hazardJitterMul != null) ? stage.hazardJitterMul : 0.06) * hmin;
 
   const pick = (arr) => {
-    if(!arr || !arr.length) return null;
+    if (!arr || !arr.length) return null;
     // bias by roomNumber so patterns vary even with similar RNG state
     const k = (roomNumber * 131 + Math.floor(rng() * 9999)) % arr.length;
     return arr[k];
   };
 
   const resolveNodes = (descList) => {
-    if(!descList) return [];
+    if (!descList) return [];
     const out = [];
-    for(const d of descList){
+    for (const d of descList) {
       // ux/uy are normalized positions in [-1..1], scaled to room
-      const x = clamp(d.ux * hx * 0.78 + (rng()*2-1) * jitter, world.minX + pad, world.maxX - pad);
-      const y = clamp(d.uy * hy * 0.78 + (rng()*2-1) * jitter, world.minY + pad, world.maxY - pad);
+      const x = clamp(d.ux * hx * 0.78 + (rng() * 2 - 1) * jitter, world.minX + pad, world.maxX - pad);
+      const y = clamp(d.uy * hy * 0.78 + (rng() * 2 - 1) * jitter, world.minY + pad, world.maxY - pad);
       const r = clamp((d.rMul || 0.8) * hmin * 1.05, 520, 1700);
 
       const n = { ...d, x, y, r };
@@ -51,21 +51,21 @@ function resolveStageFields(stage, world, roomNumber, rng){
     return out;
   };
 
-  if(layouts.magnet && layouts.magnet.length){
+  if (layouts.magnet && layouts.magnet.length) {
     stage.fields = stage.fields || {};
     stage.fields.magnet = resolveNodes(pick(layouts.magnet));
   }
-  if(layouts.void && layouts.void.length){
+  if (layouts.void && layouts.void.length) {
     stage.fields = stage.fields || {};
     stage.fields.void = resolveNodes(pick(layouts.void));
   }
 }
 
 
-function resolveStageHazards(stage, world, roomNumber, rng){
-  if(!stage || !world) return;
+function resolveStageHazards(stage, world, roomNumber, rng) {
+  if (!stage || !world) return;
   const layouts = stage.hazardLayouts;
-  if(!layouts || !layouts.length) return;
+  if (!layouts || !layouts.length) return;
 
   const hx = Math.max(1, (world.maxX - world.minX) * 0.5);
   const hy = Math.max(1, (world.maxY - world.minY) * 0.5);
@@ -75,31 +75,31 @@ function resolveStageHazards(stage, world, roomNumber, rng){
   const jitter = ((stage && stage.hazardJitterMul != null) ? stage.hazardJitterMul : 0.06) * hmin;
 
   const pick = (arr) => {
-    if(!arr || !arr.length) return null;
+    if (!arr || !arr.length) return null;
     const k = (roomNumber * 197 + Math.floor(rng() * 9999)) % arr.length;
     return arr[k];
   };
 
   const resolveDesc = (descList) => {
-    if(!descList) return [];
+    if (!descList) return [];
     const out = [];
-    for(const d of descList){
-      if(!d) continue;
-      if(d.shape === "rect"){
-        const w = clamp((d.wMul || 0.5) * hmin, 180, (world.maxX - world.minX) - pad*2);
-        const h = clamp((d.hMul || 0.35) * hmin, 160, (world.maxY - world.minY) - pad*2);
+    for (const d of descList) {
+      if (!d) continue;
+      if (d.shape === "rect") {
+        const w = clamp((d.wMul || 0.5) * hmin, 180, (world.maxX - world.minX) - pad * 2);
+        const h = clamp((d.hMul || 0.35) * hmin, 160, (world.maxY - world.minY) - pad * 2);
 
-        const x = clamp(d.ux * hx * 0.78 + (rng()*2-1) * jitter, world.minX + pad + w*0.5, world.maxX - pad - w*0.5);
-        const y = clamp(d.uy * hy * 0.78 + (rng()*2-1) * jitter, world.minY + pad + h*0.5, world.maxY - pad - h*0.5);
+        const x = clamp(d.ux * hx * 0.78 + (rng() * 2 - 1) * jitter, world.minX + pad + w * 0.5, world.maxX - pad - w * 0.5);
+        const y = clamp(d.uy * hy * 0.78 + (rng() * 2 - 1) * jitter, world.minY + pad + h * 0.5, world.maxY - pad - h * 0.5);
 
         const hobj = { ...d, x, y, w, h };
         delete hobj.ux; delete hobj.uy; delete hobj.wMul; delete hobj.hMul;
         out.push(hobj);
-      }else if(d.shape === "circle"){
+      } else if (d.shape === "circle") {
         const r = clamp((d.rMul || 0.25) * hmin, 120, hmin * 0.98);
 
-        const x = clamp(d.ux * hx * 0.78 + (rng()*2-1) * jitter, world.minX + pad + r, world.maxX - pad - r);
-        const y = clamp(d.uy * hy * 0.78 + (rng()*2-1) * jitter, world.minY + pad + r, world.maxY - pad - r);
+        const x = clamp(d.ux * hx * 0.78 + (rng() * 2 - 1) * jitter, world.minX + pad + r, world.maxX - pad - r);
+        const y = clamp(d.uy * hy * 0.78 + (rng() * 2 - 1) * jitter, world.minY + pad + r, world.maxY - pad - r);
 
         const hobj = { ...d, x, y, r };
         delete hobj.ux; delete hobj.uy; delete hobj.rMul;
@@ -110,48 +110,48 @@ function resolveStageHazards(stage, world, roomNumber, rng){
   };
 
   const chosen = pick(layouts);
-  if(chosen){
+  if (chosen) {
     stage.hazards = resolveDesc(chosen);
   }
 }
-function isFocusHeld(input){
-  if(!input) return false;
+function isFocusHeld(input) {
+  if (!input) return false;
   // support both KeyboardEvent.code ("Space") and key (" ")
   const keys = ["Space", "Spacebar", " "];
-  for(const k of keys){
-    try{
-      if(typeof input.isDown === "function" && input.isDown(k)) return true;
-    }catch(e){}
+  for (const k of keys) {
+    try {
+      if (typeof input.isDown === "function" && input.isDown(k)) return true;
+    } catch (e) { }
     // some input implementations store held keys in maps
-    if(input.keys && input.keys[k]) return true;
-    if(input.down && input.down[k]) return true;
-    if(input.held && input.held[k]) return true;
+    if (input.keys && input.keys[k]) return true;
+    if (input.down && input.down[k]) return true;
+    if (input.held && input.held[k]) return true;
   }
   return false;
 }
 
 
 // --- CCD helpers: prevent fast bullets from "tunneling" through enemies/obstacles.
-function segCircleTOI(x0, y0, x1, y1, cx, cy, r){
+function segCircleTOI(x0, y0, x1, y1, cx, cy, r) {
   // returns earliest t in [0,1] where segment is within r of (cx,cy), or null if no hit
   const dx = x1 - x0;
   const dy = y1 - y0;
-  const a = dx*dx + dy*dy;
-  if(a < 1e-8){
+  const a = dx * dx + dy * dy;
+  if (a < 1e-8) {
     const ex = x0 - cx;
     const ey = y0 - cy;
-    return (ex*ex + ey*ey <= r*r) ? 0 : null;
+    return (ex * ex + ey * ey <= r * r) ? 0 : null;
   }
-  const t = clamp(((cx - x0)*dx + (cy - y0)*dy) / a, 0, 1);
-  const px = x0 + dx*t;
-  const py = y0 + dy*t;
+  const t = clamp(((cx - x0) * dx + (cy - y0) * dy) / a, 0, 1);
+  const px = x0 + dx * t;
+  const py = y0 + dy * t;
   const ex = px - cx;
   const ey = py - cy;
-  if(ex*ex + ey*ey <= r*r) return t;
+  if (ex * ex + ey * ey <= r * r) return t;
   return null;
 }
 
-function segAabbTOI(x0, y0, x1, y1, minX, minY, maxX, maxY){
+function segAabbTOI(x0, y0, x1, y1, minX, minY, maxX, maxY) {
   // Liang-Barsky segment vs AABB, returns entry t or null
   const dx = x1 - x0;
   const dy = y1 - y0;
@@ -159,24 +159,24 @@ function segAabbTOI(x0, y0, x1, y1, minX, minY, maxX, maxY){
   let t0 = 0, t1 = 1;
 
   const clip = (p, q) => {
-    if(Math.abs(p) < 1e-8){
+    if (Math.abs(p) < 1e-8) {
       return q >= 0;
     }
     const r = q / p;
-    if(p < 0){
-      if(r > t1) return false;
-      if(r > t0) t0 = r;
-    }else{
-      if(r < t0) return false;
-      if(r < t1) t1 = r;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
     }
     return true;
   };
 
-  if(!clip(-dx, x0 - minX)) return null;
-  if(!clip( dx, maxX - x0)) return null;
-  if(!clip(-dy, y0 - minY)) return null;
-  if(!clip( dy, maxY - y0)) return null;
+  if (!clip(-dx, x0 - minX)) return null;
+  if (!clip(dx, maxX - x0)) return null;
+  if (!clip(-dy, y0 - minY)) return null;
+  if (!clip(dy, maxY - y0)) return null;
 
   return t0;
 }
@@ -276,7 +276,7 @@ export class Game {
 
   start(focusModeId) {
     this.reset();
-    if(focusModeId) this.focusModeId = String(focusModeId);
+    if (focusModeId) this.focusModeId = String(focusModeId);
     this.state = "playing";
     if (this.roomIsBoss) {
       this._spawnBoss();
@@ -320,7 +320,7 @@ export class Game {
     return clamp((this.room - 1) / 3, 0, 8);
   }
 
-_forceGainFor(enemy) {
+  _forceGainFor(enemy) {
     // FORCE gain per kill. Stronger enemies and deeper rooms yield more.
     const t = enemy?.type || "shooter";
     let base = 2;
@@ -363,10 +363,10 @@ _forceGainFor(enemy) {
 
     // room size: some stages can request a fixed rectangular arena (e.g., Ice Skating Rink)
     let baseW, baseH;
-    if(stage && stage.fixedRoom && stage.fixedRoom.w && stage.fixedRoom.h){
+    if (stage && stage.fixedRoom && stage.fixedRoom.w && stage.fixedRoom.h) {
       baseW = stage.fixedRoom.w;
       baseH = stage.fixedRoom.h;
-    }else{
+    } else {
       // vary room size so it actually feels like "rooms"
       baseW = boss ? rand(2600, 2200) : rand(2400, 1700);
       baseH = boss ? rand(2400, 2000) : rand(2300, 1600);
@@ -405,42 +405,42 @@ _forceGainFor(enemy) {
   }
 
 
-  _pickPlayerSpawn(stage, boss){
+  _pickPlayerSpawn(stage, boss) {
     const pad = boss ? 360 : 300;
     const tries = boss ? 560 : 520;
 
     let best = null;
 
-    const accept = (x,y, pass) => {
-      if(!insideSafeSpawn(x, y, this.obstacles, 0, 0, 0)) return false;
+    const accept = (x, y, pass) => {
+      if (!insideSafeSpawn(x, y, this.obstacles, 0, 0, 0)) return false;
 
       const fx = stagePointFx(stage, x, y);
-      if(fx && (fx.type === "lava" || fx.type === "toxic")) return false;
+      if (fx && (fx.type === "lava" || fx.type === "toxic")) return false;
 
       // Pass 0: try to spawn on totally clean tiles (no gimmick influence)
-      if(pass === 0){
-        if(fx && fx.type !== "none" && fx.a > 0.10) return false;
+      if (pass === 0) {
+        if (fx && fx.type !== "none" && fx.a > 0.10) return false;
       }
 
       // Even if we allow gimmicks, avoid spawning deep inside strong void pull.
-      if(fx && fx.type === "void" && fx.a > 0.30) return false;
+      if (fx && fx.type === "void" && fx.a > 0.30) return false;
 
       return true;
     };
 
-    for(let pass = 0; pass < 2; pass++){
-      for(let i = 0; i < tries; i++){
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < tries; i++) {
         const x = rand(this.world.maxX - pad, this.world.minX + pad);
         const y = rand(this.world.maxY - pad, this.world.minY + pad);
 
-        if(!accept(x,y,pass)) continue;
+        if (!accept(x, y, pass)) continue;
 
         const d = Math.hypot(x, y);
-        if(!best || d < best.d){
+        if (!best || d < best.d) {
           best = { x, y, d };
         }
       }
-      if(best) return best;
+      if (best) return best;
     }
 
     // Fallback: try a few stable spots.
@@ -451,8 +451,8 @@ _forceGainFor(enemy) {
       { x: 0, y: -pad },
       { x: 0, y: pad },
     ];
-    for(const c of cands){
-      if(accept(c.x, c.y, 1)) return c;
+    for (const c of cands) {
+      if (accept(c.x, c.y, 1)) return c;
     }
     return { x: 0, y: 0 };
   }
@@ -463,7 +463,7 @@ _forceGainFor(enemy) {
 
     const oset = stage?.obstacle || {};
     const circleBlockChance = (oset.circleBulletsBlockChance !== undefined) ? oset.circleBulletsBlockChance : 0.22;
-    const mats = Array.isArray(oset.materials) && oset.materials.length ? oset.materials : ["metal","glass"];
+    const mats = Array.isArray(oset.materials) && oset.materials.length ? oset.materials : ["metal", "glass"];
     const count = boss ? 12 : (10 + Math.floor(roomNumber * 0.25));
 
     for (let i = 0; i < count; i++) {
@@ -509,88 +509,88 @@ _forceGainFor(enemy) {
     return obs;
   }
 
-_separateEnemies(dt){
-  const es = this.enemies;
-  const n = es.length;
-  if(n <= 1) return;
+  _separateEnemies(dt) {
+    const es = this.enemies;
+    const n = es.length;
+    if (n <= 1) return;
 
-  // Spatial hash grid so we don't do O(n^2) full checks every frame.
-  const cell = 96;
-  const gx0 = this.world.minX;
-  const gy0 = this.world.minY;
-  const buckets = new Map();
+    // Spatial hash grid so we don't do O(n^2) full checks every frame.
+    const cell = 96;
+    const gx0 = this.world.minX;
+    const gy0 = this.world.minY;
+    const buckets = new Map();
 
-  for(let i=0;i<n;i++){
-    const e = es[i];
-    const cx = Math.floor((e.x - gx0) / cell);
-    const cy = Math.floor((e.y - gy0) / cell);
-    const key = cx + "," + cy;
-    let arr = buckets.get(key);
-    if(!arr){ arr = []; buckets.set(key, arr); }
-    arr.push(i);
-  }
+    for (let i = 0; i < n; i++) {
+      const e = es[i];
+      const cx = Math.floor((e.x - gx0) / cell);
+      const cy = Math.floor((e.y - gy0) / cell);
+      const key = cx + "," + cy;
+      let arr = buckets.get(key);
+      if (!arr) { arr = []; buckets.set(key, arr); }
+      arr.push(i);
+    }
 
-  const clampToWorld = (e) => {
-    e.x = clamp(e.x, this.world.minX + e.r, this.world.maxX - e.r);
-    e.y = clamp(e.y, this.world.minY + e.r, this.world.maxY - e.r);
-  };
+    const clampToWorld = (e) => {
+      e.x = clamp(e.x, this.world.minX + e.r, this.world.maxX - e.r);
+      e.y = clamp(e.y, this.world.minY + e.r, this.world.maxY - e.r);
+    };
 
-  for(let i=0;i<n;i++){
-    const a = es[i];
-    const cx = Math.floor((a.x - gx0) / cell);
-    const cy = Math.floor((a.y - gy0) / cell);
+    for (let i = 0; i < n; i++) {
+      const a = es[i];
+      const cx = Math.floor((a.x - gx0) / cell);
+      const cy = Math.floor((a.y - gy0) / cell);
 
-    for(let ox=-1; ox<=1; ox++){
-      for(let oy=-1; oy<=1; oy++){
-        const key = (cx+ox) + "," + (cy+oy);
-        const arr = buckets.get(key);
-        if(!arr) continue;
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const key = (cx + ox) + "," + (cy + oy);
+          const arr = buckets.get(key);
+          if (!arr) continue;
 
-        for(const j of arr){
-          if(j <= i) continue;
-          const b = es[j];
+          for (const j of arr) {
+            if (j <= i) continue;
+            const b = es[j];
 
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const d = Math.hypot(dx, dy) || 1e-6;
-          const minD = a.r + b.r + 2.0;
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const d = Math.hypot(dx, dy) || 1e-6;
+            const minD = a.r + b.r + 2.0;
 
-          if(d < minD){
-            const nx = dx / d;
-            const ny = dy / d;
-            const push = (minD - d) * 0.52;
+            if (d < minD) {
+              const nx = dx / d;
+              const ny = dy / d;
+              const push = (minD - d) * 0.52;
 
-            // separate positions
-            a.x += nx * push;
-            a.y += ny * push;
-            b.x -= nx * push;
-            b.y -= ny * push;
+              // separate positions
+              a.x += nx * push;
+              a.y += ny * push;
+              b.x -= nx * push;
+              b.y -= ny * push;
 
-            // reduce "sticking": remove closing velocity along the normal
-            const rvx = (a.vx || 0) - (b.vx || 0);
-            const rvy = (a.vy || 0) - (b.vy || 0);
-            const vn = rvx * nx + rvy * ny;
-            if(vn < 0){
-              const imp = (-vn) * 0.35;
-              a.vx += nx * imp;
-              a.vy += ny * imp;
-              b.vx -= nx * imp;
-              b.vy -= ny * imp;
+              // reduce "sticking": remove closing velocity along the normal
+              const rvx = (a.vx || 0) - (b.vx || 0);
+              const rvy = (a.vy || 0) - (b.vy || 0);
+              const vn = rvx * nx + rvy * ny;
+              if (vn < 0) {
+                const imp = (-vn) * 0.35;
+                a.vx += nx * imp;
+                a.vy += ny * imp;
+                b.vx -= nx * imp;
+                b.vy -= ny * imp;
+              }
+
+              clampToWorld(a);
+              clampToWorld(b);
             }
-
-            clampToWorld(a);
-            clampToWorld(b);
           }
         }
       }
     }
-  }
 
-  // one more obstacle pass after separation keeps everyone legal
-  for(const e of es){
-    this._applyObstacleCollisions(e);
+    // one more obstacle pass after separation keeps everyone legal
+    for (const e of es) {
+      this._applyObstacleCollisions(e);
+    }
   }
-}
 
 
   _applyObstacleCollisions(ent) {
@@ -785,7 +785,7 @@ _separateEnemies(dt){
     return `Weapon: ${weapon} | Build: ` + parts.join(" / ");
   }
 
-  getStageHUD(){
+  getStageHUD() {
     return {
       mapName: this.stageName || "",
       mapGimmick: this.stageGimmick || "",
@@ -793,7 +793,7 @@ _separateEnemies(dt){
     };
   }
 
-  getIntroLines(){
+  getIntroLines() {
     const rn = this.room | 0;
     const l1 = `ROOM ${rn}`;
     const l2 = this.stageName || "ROOM";
@@ -852,7 +852,7 @@ _separateEnemies(dt){
     // NOTE: older Input implementations use KeyboardEvent.key (" "), newer use code ("Space").
     const _focusHeld = isFocusHeld(input);
     // allow start() param OR localStorage fallback (so title select works even if main.js forgets to pass)
-    if(!this.focusModeId && typeof localStorage !== "undefined"){
+    if (!this.focusModeId && typeof localStorage !== "undefined") {
       this.focusModeId = localStorage.getItem("nw_focusModeId") || localStorage.getItem("nw_focus_mode") || "chrono";
     }
     const fm = getFocusMode(this.focusModeId || "chrono");
@@ -868,26 +868,26 @@ _separateEnemies(dt){
     const recoverMin = Math.max((fm.recoverFocus ?? 0), minActivate);
 
     // If exhausted, you MUST release and recharge before you can use FOCUS again.
-    if(this._focusExhausted){
-      if(!_focusHeld && this.player.focus >= recoverMin){
+    if (this._focusExhausted) {
+      if (!_focusHeld && this.player.focus >= recoverMin) {
         this._focusExhausted = false;
       }
     }
 
     let focusActive = false;
-    if(_focusHeld && !this._focusExhausted){
+    if (_focusHeld && !this._focusExhausted) {
       // Once active, allow it to run down to a small floor; but starting requires a meaningful chunk.
       focusActive = wasActive ? (this.player.focus >= minSustain) : (this.player.focus >= minActivate);
     }
 
     // one-time activation cost (prevents "tap spam" and adds texture to balance)
     // NOTE: we key off "wasActive" so holding Space doesn't repeatedly charge.
-    if(focusActive && !wasActive){
+    if (focusActive && !wasActive) {
       const startCost = (fm.startCost ?? 0);
-      if(startCost > 0){
+      if (startCost > 0) {
         this.player.focus = Math.max(0, this.player.focus - startCost);
       }
-      if(this.player.focus < minSustain){
+      if (this.player.focus < minSustain) {
         // tried to start with too little: burn out immediately
         this.player.focus = 0;
         this._focusExhausted = true;
@@ -918,7 +918,7 @@ _separateEnemies(dt){
       this.player.focus = Math.max(0, this.player.focus - cost * dt);
 
       // If you hit the floor while holding, force a burnout lockout.
-      if(this.player.focus < minSustain){
+      if (this.player.focus < minSustain) {
         this.player.focus = 0;
         this._focusExhausted = true;
         focusActive = false;
@@ -940,7 +940,7 @@ _separateEnemies(dt){
 
     // on-hit budget (for modes like SIPHON to prevent infinite sustain)
     this._onHitBudgetT -= dt;
-    if(this._onHitBudgetT <= 0){
+    if (this._onHitBudgetT <= 0) {
       this._onHitBudgetT = 1.0;
       this._onHitFocusGained = 0;
       this._onHitHpGained = 0;
@@ -960,23 +960,23 @@ _separateEnemies(dt){
     // Focus pulse (NOVA): on-demand + periodic while active
     this._focusTapCD = Math.max(0, (this._focusTapCD || 0) - dt);
 
-    if(focusActive && fm.pulse){
+    if (focusActive && fm.pulse) {
       const pulse = fm.pulse;
       const period = pulse.period ?? 0.65;
 
       // First pulse should be immediate so it can be used as a real "panic button".
       const justActivated = !wasActive;
       const tapCd = pulse.tapCd ?? 0;
-      if(justActivated && (pulse.immediate !== false)){
-        if(this._focusTapCD <= 0){
+      if (justActivated && (pulse.immediate !== false)) {
+        if (this._focusTapCD <= 0) {
           this._focusPulse(fm, reducedMotion);
-          if(tapCd > 0) this._focusTapCD = tapCd;
+          if (tapCd > 0) this._focusTapCD = tapCd;
         }
         this._focusPulseT = 0;
       }
 
       this._focusPulseT = (this._focusPulseT || 0) + dtWorld;
-      while(this._focusPulseT >= period){
+      while (this._focusPulseT >= period) {
         this._focusPulseT -= period;
         this._focusPulse(fm, reducedMotion);
       }
@@ -985,7 +985,7 @@ _separateEnemies(dt){
     }
 
     // short post-pulse barrier (lets NOVA be used offensively without instant suicide)
-    if(this._pulseBarrierT > 0){
+    if (this._pulseBarrierT > 0) {
       this._pulseBarrierT = Math.max(0, this._pulseBarrierT - dt);
     }
 
@@ -1111,47 +1111,47 @@ _separateEnemies(dt){
 
 
 
-// --- enemy terrain effects (light, but meaningful)
-// Stage hazards can also punish enemies; smarter AI will learn to avoid them.
-const voidNodes = this.stage.fields?.void || [];
-for(const e of this.enemies){
-  // Lava/Toxic chip damage (so hazards matter for lures), kept modest for balance.
-  const efx = stagePointFx(this.stage, e.x, e.y);
-  e.stageFxType = efx.type;
-  e.stageFxA = efx.a;
+      // --- enemy terrain effects (light, but meaningful)
+      // Stage hazards can also punish enemies; smarter AI will learn to avoid them.
+      const voidNodes = this.stage.fields?.void || [];
+      for (const e of this.enemies) {
+        // Lava/Toxic chip damage (so hazards matter for lures), kept modest for balance.
+        const efx = stagePointFx(this.stage, e.x, e.y);
+        e.stageFxType = efx.type;
+        e.stageFxA = efx.a;
 
-  if(efx.type === "lava"){
-    const dps = efx.data?.dps ?? 18;
-    const mul = (e.type === "warden") ? 0.22 : 0.32;
-    e.hp = Math.max(0, e.hp - dps * mul * efx.a * dt);
-  }else if(efx.type === "toxic"){
-    const dps = efx.data?.dps ?? 5;
-    const mul = (e.type === "warden") ? 0.26 : 0.38;
-    e.hp = Math.max(0, e.hp - dps * mul * efx.a * dt);
-  }
+        if (efx.type === "lava") {
+          const dps = efx.data?.dps ?? 18;
+          const mul = (e.type === "warden") ? 0.22 : 0.32;
+          e.hp = Math.max(0, e.hp - dps * mul * efx.a * dt);
+        } else if (efx.type === "toxic") {
+          const dps = efx.data?.dps ?? 5;
+          const mul = (e.type === "warden") ? 0.26 : 0.38;
+          e.hp = Math.max(0, e.hp - dps * mul * efx.a * dt);
+        }
 
-  // VOID pulls enemies too (independent of whether another hazard is stronger here).
-  if(voidNodes.length){
-    let ax = 0, ay = 0;
-    for(const n of voidNodes){
-      const dx = n.x - e.x;
-      const dy = n.y - e.y;
-      const d = Math.hypot(dx, dy) || 1;
-      if(d <= n.r){
-        const t = 1 - d / n.r;
-        const t2 = t * t;
-        const pull = (n.pull ?? n.strength ?? 2000);
-        const enemyMul = (n.enemyMul !== undefined) ? n.enemyMul : 0.55;
+        // VOID pulls enemies too (independent of whether another hazard is stronger here).
+        if (voidNodes.length) {
+          let ax = 0, ay = 0;
+          for (const n of voidNodes) {
+            const dx = n.x - e.x;
+            const dy = n.y - e.y;
+            const d = Math.hypot(dx, dy) || 1;
+            if (d <= n.r) {
+              const t = 1 - d / n.r;
+              const t2 = t * t;
+              const pull = (n.pull ?? n.strength ?? 2000);
+              const enemyMul = (n.enemyMul !== undefined) ? n.enemyMul : 0.55;
 
-        const dv = clamp(pull * enemyMul * t2 * dtWorld * 0.045, 0, 2.6);
-        ax += (dx / d) * dv;
-        ay += (dy / d) * dv;
+              const dv = clamp(pull * enemyMul * t2 * dtWorld * 0.045, 0, 2.6);
+              ax += (dx / d) * dv;
+              ay += (dy / d) * dv;
+            }
+          }
+          e.vx += ax;
+          e.vy += ay;
+        }
       }
-    }
-    e.vx += ax;
-    e.vy += ay;
-  }
-}
       this.player.envMoveMul = envMove;
       this.player.envFrictionMul = envFric;
       this.player.envFocusRegenMul = envRegen;
@@ -1209,7 +1209,7 @@ for(const e of this.enemies){
         this.particles.burst({ x: s0.x, y: s0.y }, 8, { speedMin: 110, speedMax: 360, lifeMin: 0.08, lifeMax: 0.22, glow: 14 });
       }
     }
-// spawns
+    // spawns
     if (!this.roomIsBoss) {
       const base = 0.92;
       const spawnRate = lerp(base, 0.30, clamp(this.room / 24, 0, 1));
@@ -1305,18 +1305,18 @@ for(const e of this.enemies){
     this._separateEnemies(dtWorld);
 
     // NOVA pulse barrier: brief keep-away window after each shockwave
-    if(this._pulseBarrierT > 0){
+    if (this._pulseBarrierT > 0) {
       const rr = (this._pulseBarrierR || 220);
       const str = (this._pulseBarrierStr || 8200);
       const denyR = Math.max(0, rr * 0.70);
 
-      for(const e of this.enemies){
+      for (const e of this.enemies) {
         const dx = e.x - this.player.x;
         const dy = e.y - this.player.y;
-        const d2 = dx*dx + dy*dy;
-        if(d2 < rr*rr){
+        const d2 = dx * dx + dy * dy;
+        if (d2 < rr * rr) {
           const d = Math.sqrt(d2) || 1;
-          const tt = 1 - d/rr;
+          const tt = 1 - d / rr;
           const nx = dx / d;
           const ny = dy / d;
 
@@ -1326,7 +1326,7 @@ for(const e of this.enemies){
           e.vy += ny * dv;
 
           // hard deny in the inner core so contact damage can't "hug" you during the pulse window
-          if(d < denyR){
+          if (d < denyR) {
             e.x = this.player.x + nx * denyR;
             e.y = this.player.y + ny * denyR;
             e.vx += nx * 240;
@@ -1336,32 +1336,32 @@ for(const e of this.enemies){
       }
     }
 
-// FOCUS repel field (makes positioning feel "weighty")
-    if(this._focusActive && this._focusMode && this._focusMode.repelEnemies){
+    // FOCUS repel field (makes positioning feel "weighty")
+    if (this._focusActive && this._focusMode && this._focusMode.repelEnemies) {
       const rr = this._focusMode.repelEnemies.radius ?? 180;
       const str = this._focusMode.repelEnemies.strength ?? 4200;
-      for(const e of this.enemies){
+      for (const e of this.enemies) {
         const dx = e.x - this.player.x;
         const dy = e.y - this.player.y;
-        const d2 = dx*dx + dy*dy;
-        if(d2 < rr*rr){
+        const d2 = dx * dx + dy * dy;
+        if (d2 < rr * rr) {
           const d = Math.sqrt(d2) || 1;
-          const t = 1 - d/rr;
+          const t = 1 - d / rr;
           const dv = (str * t) * dtWorld * 0.001;
-          e.vx += (dx/d) * dv;
-          e.vy += (dy/d) * dv;
+          e.vx += (dx / d) * dv;
+          e.vy += (dy / d) * dv;
         }
       }
     }
 
     // REPULSOR: enemies cannot enter the core radius (true "keep-away" field)
-    if(this._focusActive && this._focusMode && this._focusMode.denyRadius){
+    if (this._focusActive && this._focusMode && this._focusMode.denyRadius) {
       const denyR = this._focusMode.denyRadius;
-      for(const e of this.enemies){
+      for (const e of this.enemies) {
         const dx = e.x - this.player.x;
         const dy = e.y - this.player.y;
-        const d2 = dx*dx + dy*dy;
-        if(d2 < denyR*denyR){
+        const d2 = dx * dx + dy * dy;
+        if (d2 < denyR * denyR) {
           const d = Math.sqrt(d2) || 1;
           const nx = dx / d;
           const ny = dy / d;
@@ -1377,19 +1377,19 @@ for(const e of this.enemies){
     }
 
     // REPULSOR: additional drag close to the player (makes approach feel "sticky")
-    if(this._focusActive && this._focusMode && (this._focusMode.dragEnemies || this._focusMode.drag)){
+    if (this._focusActive && this._focusMode && (this._focusMode.dragEnemies || this._focusMode.drag)) {
       const rr = (this._focusMode.dragEnemies && this._focusMode.dragEnemies.radius !== undefined)
         ? this._focusMode.dragEnemies.radius
         : (this._focusMode.repelEnemies ? (this._focusMode.repelEnemies.radius ?? 300) : 300);
       const drag = (this._focusMode.dragEnemies && this._focusMode.dragEnemies.drag !== undefined)
         ? this._focusMode.dragEnemies.drag
         : (this._focusMode.drag ?? 6);
-      for(const e of this.enemies){
+      for (const e of this.enemies) {
         const dx = e.x - this.player.x;
         const dy = e.y - this.player.y;
         const d = Math.hypot(dx, dy) || 1;
-        if(d < rr){
-          const t = 1 - d/rr;
+        if (d < rr) {
+          const t = 1 - d / rr;
           const k = Math.exp(-(drag * t) * dtWorld);
           e.vx *= k;
           e.vy *= k;
@@ -1407,9 +1407,9 @@ for(const e of this.enemies){
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       // per-bullet collision ignore window (helps piercing bullets pass through instead of multi-hitting one target)
-      if(b._ignoreEnemyT){
+      if (b._ignoreEnemyT) {
         b._ignoreEnemyT -= dtWorld;
-        if(b._ignoreEnemyT <= 0){
+        if (b._ignoreEnemyT <= 0) {
           b._ignoreEnemyT = 0;
           b._ignoreEnemy = null;
         }
@@ -1509,7 +1509,7 @@ for(const e of this.enemies){
       b._py = b.y;
       b.update(dtWorld);
       // FOCUS defensive fields vs enemy bullets (AEGIS / REPULSOR), with CCD so fast bullets can't slip through.
-      if(!b.dead && this._focusActive && this._focusMode && b.team === "enemy"){
+      if (!b.dead && this._focusActive && this._focusMode && b.team === "enemy") {
         const fm = this._focusMode;
         const px = this.player.x;
         const py = this.player.y;
@@ -1519,10 +1519,10 @@ for(const e of this.enemies){
         const by1 = b.y;
 
         // AEGIS: absorb bullets that cross the shield radius
-        if(fm.shield){
+        if (fm.shield) {
           const sr = (fm.shield.radius != null) ? fm.shield.radius : 160;
           const hit = segCircleTOI(bx0, by0, bx1, by1, px, py, sr + b.r);
-          if(hit !== null){
+          if (hit !== null) {
             const hx = bx0 + (bx1 - bx0) * hit;
             const hy = by0 + (by1 - by0) * hit;
 
@@ -1534,10 +1534,10 @@ for(const e of this.enemies){
         }
 
         // REPULSOR: bend bullets away, and optionally reflect them in an inner core.
-        if(!b.dead && fm.repelBullets){
+        if (!b.dead && fm.repelBullets) {
           const rr = (fm.repelBullets.radius != null) ? fm.repelBullets.radius : 260;
           const hit = segCircleTOI(bx0, by0, bx1, by1, px, py, rr + b.r);
-          if(hit !== null){
+          if (hit !== null) {
             const hx = bx0 + (bx1 - bx0) * hit;
             const hy = by0 + (by1 - by0) * hit;
 
@@ -1548,10 +1548,10 @@ for(const e of this.enemies){
             const ny = dy / d;
 
             // reflect first (if supported)
-            if(fm.reflectBullets){
+            if (fm.reflectBullets) {
               const inner = (fm.reflectBullets.inner != null) ? fm.reflectBullets.inner : (rr * 0.55);
               const hitIn = segCircleTOI(bx0, by0, bx1, by1, px, py, inner + b.r);
-              if(hitIn !== null){
+              if (hitIn !== null) {
                 const sp = Math.hypot(b.vx, b.vy) || 1;
                 const spMul = (fm.reflectBullets.speedMul != null) ? fm.reflectBullets.speedMul : 1.05;
                 const dmgMul = (fm.reflectBullets.damageMul != null) ? fm.reflectBullets.damageMul : 0.75;
@@ -1574,7 +1574,7 @@ for(const e of this.enemies){
             }
 
             // if it wasn't reflected, bend outward and push it out of the bubble
-            if(b.team === "enemy"){
+            if (b.team === "enemy") {
               const sp = Math.hypot(b.vx, b.vy) || 1;
               const vx = b.vx / sp;
               const vy = b.vy / sp;
@@ -1601,7 +1601,7 @@ for(const e of this.enemies){
         }
       }
 
-if (b.dead) {
+      if (b.dead) {
         if (b.explodeR > 0) {
           this._explodeAt(b.x, b.y, b.team, b.damage, b.explodeR, b.explodeFalloff, reducedMotion);
         }
@@ -1936,12 +1936,12 @@ if (b.dead) {
     this._startCombat();
   }
 
-_focusPulse(fm, reducedMotion){
+  _focusPulse(fm, reducedMotion) {
     // NOVA: radial shockwave. Scales with your damage so it stays relevant.
     const p = this.player;
-    if(!p) return;
+    if (!p) return;
     const pulse = fm && fm.pulse ? fm.pulse : null;
-    if(!pulse) return;
+    if (!pulse) return;
 
     const r = pulse.radius ?? 170;
     const base = pulse.damage ?? 14;
@@ -1954,25 +1954,25 @@ _focusPulse(fm, reducedMotion){
 
     // per-pulse cost (prevents "free" spam by tap or long-hold)
     const pcost = pulse.cost ?? 0;
-    if(pcost > 0){
-      if(p.focus <= pcost){
+    if (pcost > 0) {
+      if (p.focus <= pcost) {
         p.focus = 0;
         this._focusExhausted = true;
         return;
       }
       p.focus = Math.max(0, p.focus - pcost);
-      if(p.focus <= 0) this._focusExhausted = true;
+      if (p.focus <= 0) this._focusExhausted = true;
     }
 
     // tiny i-frames after the blast so using it up-close isn't pure self-harm
     const ifr = pulse.iframes ?? 0;
-    if(ifr > 0){
+    if (ifr > 0) {
       p.invuln = Math.max(p.invuln || 0, ifr);
     }
 
     // brief post-pulse barrier (enemy keep-away)
     const bar = pulse.barrier || null;
-    if(bar){
+    if (bar) {
       const dur = bar.dur ?? 0.22;
       this._pulseBarrierT = Math.max(this._pulseBarrierT || 0, dur);
       const radius = bar.radius ?? (r * 0.70);
@@ -1982,7 +1982,7 @@ _focusPulse(fm, reducedMotion){
 
     // visuals
     this.particles.ring({ x, y }, r * 0.55, { speedMin: 260, speedMax: 860, lifeMin: 0.10, lifeMax: 0.32, glow: 30 });
-    if(!reducedMotion) this._shake(4.2);
+    if (!reducedMotion) this._shake(4.2);
 
     // damage enemies
     const rr2 = (r * r);
@@ -1990,11 +1990,11 @@ _focusPulse(fm, reducedMotion){
     const falloff = (pulse.falloff !== undefined) ? pulse.falloff : 1.0;
     const kb = (pulse.knock !== undefined) ? pulse.knock : 0;
 
-    for(const e of this.enemies){
+    for (const e of this.enemies) {
       const dx = e.x - x;
       const dy = e.y - y;
-      const d2 = dx*dx + dy*dy;
-      if(d2 <= rr2){
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= rr2) {
         const d = Math.sqrt(d2) || 1;
         const k = 1 - clamp(d / r, 0, 1);
 
@@ -2003,33 +2003,33 @@ _focusPulse(fm, reducedMotion){
 
         e.takeDamage(dmg * mul * dm);
 
-        if(kb > 0){
+        if (kb > 0) {
           const push = kb * k;
-          e.vx += (dx/d) * (push * 420);
-          e.vy += (dy/d) * (push * 420);
+          e.vx += (dx / d) * (push * 420);
+          e.vy += (dy / d) * (push * 420);
         }
       }
     }
 
     // Clear nearby enemy bullets (reads as a true shockwave, not just damage)
-    if(pulse.clearBullets){
+    if (pulse.clearBullets) {
       const mul = pulse.clearRadiusMul ?? 1.05;
       const br = r * mul;
       const br2 = br * br;
 
       let cleared = 0;
-      for(let i = this.bullets.length - 1; i >= 0; i--){
+      for (let i = this.bullets.length - 1; i >= 0; i--) {
         const b = this.bullets[i];
-        if(!b || b.team !== "enemy") continue;
+        if (!b || b.team !== "enemy") continue;
         const dx = b.x - x;
         const dy = b.y - y;
-        if(dx*dx + dy*dy <= br2){
+        if (dx * dx + dy * dy <= br2) {
           this.bullets.splice(i, 1);
           cleared++;
         }
       }
 
-      if(cleared > 0){
+      if (cleared > 0) {
         const n = reducedMotion ? Math.min(6, cleared) : Math.min(18, 6 + Math.floor(cleared * 0.25));
         this.particles.burst({ x, y }, n, { speedMin: 140, speedMax: 720, lifeMin: 0.06, lifeMax: 0.22, glow: 22 });
       }
@@ -2053,7 +2053,7 @@ _focusPulse(fm, reducedMotion){
       const y1 = b.y;
 
       for (const e of this.enemies) {
-        if(b._ignoreEnemyT && b._ignoreEnemy === e) continue;
+        if (b._ignoreEnemyT && b._ignoreEnemy === e) continue;
         const rr = b.r + e.r;
         const toi = segCircleTOI(x0, y0, x1, y1, e.x, e.y, rr);
         if (toi !== null) {
@@ -2071,32 +2071,32 @@ _focusPulse(fm, reducedMotion){
           e.takeDamage(b.damage);
 
           // FOCUS on-hit effects (e.g. SIPHON)
-          if(this._focusActive && this._focusMode && this._focusMode.onHit){
+          if (this._focusActive && this._focusMode && this._focusMode.onHit) {
             const oh = this._focusMode.onHit;
             const cap = this._focusMode.onHitCap || null;
 
             let addF = oh.focus || 0;
             let addH = oh.hp || 0;
 
-            if(cap){
+            if (cap) {
               const capF = cap.focusPerSec ?? 1e9;
               const capH = cap.hpPerSec ?? 1e9;
 
-              if(addF > 0){
+              if (addF > 0) {
                 const remainF = Math.max(0, capF - (this._onHitFocusGained || 0));
                 addF = Math.min(addF, remainF);
               }
-              if(addH > 0){
+              if (addH > 0) {
                 const remainH = Math.max(0, capH - (this._onHitHpGained || 0));
                 addH = Math.min(addH, remainH);
               }
             }
 
-            if(addF > 0){
+            if (addF > 0) {
               this.player.focus = Math.min(this.player.focusMax, this.player.focus + addF);
               this._onHitFocusGained = (this._onHitFocusGained || 0) + addF;
             }
-            if(addH > 0){
+            if (addH > 0) {
               this.player.hp = Math.min(this.player.hpMax, this.player.hp + addH);
               this._onHitHpGained = (this._onHitHpGained || 0) + addH;
             }
@@ -2130,12 +2130,12 @@ _focusPulse(fm, reducedMotion){
               ? this._focusMode.pierceDamageMul
               : 0.85;
             b.damage *= decay;
-          // Avoid multi-hitting the same enemy across frames; push the bullet through the target.
-          b._ignoreEnemy = e;
-          b._ignoreEnemyT = 0.06;
-          const sp = Math.hypot(b.vx, b.vy) || 1;
-          b.x += (b.vx / sp) * (e.r + b.r + 2);
-          b.y += (b.vy / sp) * (e.r + b.r + 2);
+            // Avoid multi-hitting the same enemy across frames; push the bullet through the target.
+            b._ignoreEnemy = e;
+            b._ignoreEnemyT = 0.06;
+            const sp = Math.hypot(b.vx, b.vy) || 1;
+            b.x += (b.vx / sp) * (e.r + b.r + 2);
+            b.y += (b.vy / sp) * (e.r + b.r + 2);
           } else {
             remove = true;
           }

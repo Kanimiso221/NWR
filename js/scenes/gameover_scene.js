@@ -9,8 +9,7 @@ export class GameOverScene {
   }
 
   update(dt) {
-    const { input, ui } = this.engine;
-    if (ui) ui.show("gameover");
+    const { input } = this.engine;
 
     // Enter restarts
     if (input && input.consumePressed("Enter")) {

@@ -202,20 +202,21 @@ export class UI {
   // Overlay visibility
   // ------------------------------
   show(mode){
-    this._mode = mode;
+    const m = String(mode || "");
+    this._mode = m;
     this.overlay.classList.add("show");
 
     // Enable scene-specific CSS (panel accent, background tint, etc.)
     try{
-      this.overlay.dataset.mode = String(mode || "");
-      document.body.dataset.scene = String(mode || "");
+      this.overlay.dataset.mode = m;
+      document.body.dataset.scene = m;
     }catch(e){}
 
-    const isTitle = mode === "title";
-    const isPause = mode === "pause";
-    const isOver = mode === "gameover";
-    const isReward = mode === "reward";
-    const isShop = mode === "shop";
+    const isTitle = m === "title";
+    const isPause = m === "pause";
+    const isOver = m === "gameover";
+    const isReward = m === "reward";
+    const isShop = m === "shop";
 
     this.startBtn.classList.toggle("hidden", !(isTitle));
     this.resumeBtn.classList.toggle("hidden", !(isPause));

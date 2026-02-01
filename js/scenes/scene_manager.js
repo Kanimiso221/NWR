@@ -64,7 +64,17 @@ export class SceneManager {
     // During a fade transition, compare against the target, not the currentId,
     // so we don't keep restarting the fade every frame.
     const cur = (this._fade.active && this._targetId) ? this._targetId : this.currentId;
-    if (want && want !== cur) this.set(want);
+    if (!want || want === cur) return;
+
+    // Avoid a "frozen last frame" moment: as soon as game.state flips to gameover,
+    // RunScene stops updating (by design). Switching instantly makes the transition
+    // feel snappy and prevents it from looking like the game hard-stalled.
+    if (want === "gameover") {
+      this.set(want, null, { instant: true });
+      return;
+    }
+
+    this.set(want);
   }
 
   // backward-compatible alias
