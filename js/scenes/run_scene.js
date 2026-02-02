@@ -13,11 +13,16 @@ export class RunScene {
     const { game, input, ui, lobby, mp } = this.engine;
     if (!game || game.state !== "playing") return;
 
+    // Multiplayer: some net code needs to observe raw input BEFORE the local simulation
+    // consumes one-frame presses (dash, etc.).
+    if (mp && typeof mp.preUpdate === "function") mp.preUpdate(dt, game, lobby, input);
+
     const res = game.update(dt, input, ui && ui.reducedMotion);
     this._timeScale = (res && res.timeScale != null) ? res.timeScale : 1;
 
-    // Multiplayer tick (No.3): snapshot / presence channel
-    if (mp && typeof mp.update === "function") mp.update(dt, game, lobby);
+    // Multiplayer tick (No.3/No.4): snapshot / presence channel
+    if (mp && typeof mp.postUpdate === "function") mp.postUpdate(dt, game, lobby, input);
+    else if (mp && typeof mp.update === "function") mp.update(dt, game, lobby);
   }
 
   render() {

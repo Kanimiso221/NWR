@@ -120,6 +120,13 @@ export class Input {
     return false;
   }
 
+  // Peek without consuming. Useful for networking (send a one-frame "pressed" event
+  // while still letting the local simulation consume it in-game).
+  peekPressed(code){
+    if(this.locked) return false;
+    return this.keysPressed.has(code);
+  }
+
   consumeMousePressed(){
     if(this.locked){
       this.mouse.pressed = false;

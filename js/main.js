@@ -1,5 +1,6 @@
 import { Input } from "./input.js";
 import { Game } from "./game.js";
+import { Player } from "./entities.js";
 import { UI } from "./ui.js";
 import { Sfx } from "./audio.js";
 import { Bgm } from "./bgm.js";
@@ -31,18 +32,27 @@ const particles = new ParticleSystem();
 const lobby = new LobbyClient();
 
 
-// Multiplayer runtime (No.3): share lightweight player snapshots so everyone can *see* each other.
-// NOTE: Gameplay is still local-sim for now; this is "visibility first".
-// Later steps (No.4+) will switch to host-authoritative simulation.
+// Multiplayer runtime (No.4): host-authoritative movement.
+// - Clients send INPUT (move/aim/dash/focus) to the host.
+// - Host simulates movement for everyone and broadcasts a snapshot.
+// - Clients use the snapshot to render others, and (for now) hard-correct their own position.
+// NOTE: Bullets/enemies are still local-sim; next steps (No.5+) will sync bullets + damage.
 const mp = {
   runId: 0,
   sendSeq: 0,
   snapTick: 0,
   lastSnapTick: -1,
-  // client -> host: last known state for each client (host only)
-  lastClientState: new Map(), // id -> state
+
+  // host: latest input for each client
+  lastClientInput: new Map(), // id -> netInput
+  // host: simulated players (movement only)
+  simPlayers: new Map(), // id -> Player
   // render-only remote avatars on this machine (everyone)
   remotePlayers: new Map(), // id -> pseudo-player (for drawPlayer)
+
+  // client: last authoritative state for myself
+  selfAuth: null,
+
   _sendAcc: 0,
   _snapAcc: 0,
 
@@ -51,50 +61,97 @@ const mp = {
     this.sendSeq = 0;
     this.snapTick = 0;
     this.lastSnapTick = -1;
-    this.lastClientState.clear();
+    this.lastClientInput.clear();
+    this.simPlayers.clear();
     this.remotePlayers.clear();
+    this.selfAuth = null;
     this._sendAcc = 0;
     this._snapAcc = 0;
   },
 
-  // Called from RunScene.update()
-  update(dt, game, lobby){
+  // Called from RunScene.update() BEFORE game.update
+  preUpdate(dt, game, lobby, input){
     if(!lobby || !lobby.connected || !game || game.state !== "playing") return;
 
-    // Clients periodically send their current avatar state to the host (temporary, No.3).
-    if(!lobby.isHost){
-      this._sendAcc += dt;
-      if(this._sendAcc >= (1/20)){
-        this._sendAcc = 0;
-        const p = game.player;
-        lobby.sendInput(_packNetPlayer(p), this.sendSeq++);
-      }
-      return;
+    // Client: apply authoritative correction before local sim so camera doesn't drift.
+    if(!lobby.isHost && this.selfAuth){
+      _applySelfAuth(game, this.selfAuth);
     }
 
-    // Host broadcasts party snapshot at a steady cadence.
+    // Client: send input to host.
+    if(!lobby.isHost){
+      this._sendAcc += dt;
+      if(this._sendAcc >= (1/30)){
+        this._sendAcc = 0;
+        lobby.sendInput(_packNetInput(game, input), this.sendSeq++);
+      }
+    }
+  },
+
+  // Called from RunScene.update() AFTER game.update
+  postUpdate(dt, game, lobby){
+    if(!lobby || !lobby.connected || !game || game.state !== "playing") return;
+    if(!lobby.isHost) return;
+
+    // Host: simulate remote players every frame (movement only).
+    const me = _resolveMyId(lobby);
+    const members = Array.isArray(lobby.members) ? lobby.members : [];
+
+    let idx = 0;
+    for(const m of members){
+      const id = m && m.id ? String(m.id) : "";
+      if(!id || id === me) continue;
+
+      let p = this.simPlayers.get(id);
+      if(!p){
+        // Spawn near host until we add proper spawn-slot distribution.
+        const ox = 28 + (idx % 2) * 36;
+        const oy = 28 + ((idx / 2) | 0) * 36;
+        p = new Player(game.player.x + ox, game.player.y + oy);
+        p.focusModeId = "chrono";
+        p.focusActive = false;
+        p.stageFxType = "none";
+        p.stageFxA = 0;
+        this.simPlayers.set(id, p);
+        idx++;
+      }
+
+      const ni = this.lastClientInput.get(id) || null;
+      // Approx: treat Space as "focus active" for visuals.
+      p.focusActive = !!(ni && ni.focus);
+      p.focusModeId = (ni && ni.fm) ? ni.fm : (p.focusModeId || "chrono");
+
+      const fakeInput = _makeFakeInput(ni);
+      p.update(dt, fakeInput, game.world);
+      if(typeof game._applyObstacleCollisions === "function") game._applyObstacleCollisions(p);
+    }
+
+    // prune sims for leavers
+    const memberIds = new Set(members.map(mm => String(mm && mm.id || "")).filter(Boolean));
+    for(const [id] of this.simPlayers){
+      if(!memberIds.has(id)) this.simPlayers.delete(id);
+    }
+    for(const [id] of this.lastClientInput){
+      if(!memberIds.has(id)) this.lastClientInput.delete(id);
+    }
+
+    // Host: broadcast snapshot at a steady cadence.
     this._snapAcc += dt;
     if(this._snapAcc >= (1/15)){
       this._snapAcc = 0;
       const players = [];
-      const me = lobby.selfId || "";
-      const members = Array.isArray(lobby.members) ? lobby.members : [];
-      // host's own state comes from the authoritative local Game
-      players.push(Object.assign({ id: me }, _packNetPlayer(game.player)));
+      if(me){
+        players.push(Object.assign({ id: me }, _packNetPlayer(game.player)));
+      }
 
       for(const m of members){
         const id = m && m.id ? String(m.id) : "";
         if(!id || id === me) continue;
-        const st = this.lastClientState.get(id);
-        if(st){
-          players.push(Object.assign({ id }, st));
-        }else{
-          // fallback: spawn near host until first packet arrives
-          players.push({ id, x: game.player.x + 28, y: game.player.y + 28, r: 16, face: 0, focusActive: false, focusModeId: "chrono", hp: 100, hpMax: 100, focus: 100, focusMax: 100, dashTime: 0, invuln: 0, stageFxType: "none", stageFxA: 0 });
-        }
+        const sp = this.simPlayers.get(id);
+        if(sp) players.push(Object.assign({ id }, _packNetPlayer(sp)));
       }
 
-      lobby.sendSnapshot({ runId: this.runId, time: game.time, players }, this.snapTick++);
+      lobby.sendSnapshot({ runId: this.runId, time: game.time, room: game.room, players }, this.snapTick++);
     }
   }
 };
@@ -102,6 +159,16 @@ const mp = {
 function _num(v, fallback=0){
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function _resolveMyId(lobby){
+  const sid = String((lobby && lobby.selfId) || "");
+  if(sid) return sid;
+  const hid = String((lobby && lobby.hostId) || "");
+  if(lobby && lobby.isHost && hid) return hid;
+  const members = (lobby && Array.isArray(lobby.members)) ? lobby.members : [];
+  const hm = members.find(m => m && (m.host || m.isHost));
+  return hm ? String(hm.id || "") : "";
 }
 
 function _packNetPlayer(p){
@@ -121,6 +188,58 @@ function _packNetPlayer(p){
     invuln: _num(p.invuln, 0),
     stageFxType: String(p.stageFxType || "none").slice(0, 16),
     stageFxA: _num(p.stageFxA, 0),
+  };
+}
+
+function _packNetInput(game, input){
+  const mv = (input && typeof input.getMoveVector === "function") ? input.getMoveVector() : { x: 0, y: 0 };
+  const mvx = Math.max(-1, Math.min(1, _num(mv.x, 0)));
+  const mvy = Math.max(-1, Math.min(1, _num(mv.y, 0)));
+
+  const dash = !!(input && typeof input.peekPressed === "function" && (input.peekPressed("ShiftLeft") || input.peekPressed("ShiftRight")));
+  const focus = !!(input && typeof input.isDown === "function" && (input.isDown("Space") || input.isDown("Spacebar")));
+  const shoot = !!(input && input.mouse && input.mouse.down);
+
+  const cam = (game && game.camera) ? game.camera : { x: 0, y: 0 };
+  const mx = _num(input && input.mouse ? input.mouse.x : 0, 0);
+  const my = _num(input && input.mouse ? input.mouse.y : 0, 0);
+  const aimX = mx + _num(cam.x, 0);
+  const aimY = my + _num(cam.y, 0);
+
+  const fm = String((game && game.focusModeId) || (game && game.player && game.player.focusModeId) || "chrono").slice(0, 32);
+  return { mvx, mvy, aimX, aimY, dash: dash ? 1 : 0, focus: focus ? 1 : 0, shoot: shoot ? 1 : 0, fm };
+}
+
+function _coerceNetInput(s){
+  if(!s || typeof s !== "object") return null;
+  return {
+    mvx: Math.max(-1, Math.min(1, _num(s.mvx, 0))),
+    mvy: Math.max(-1, Math.min(1, _num(s.mvy, 0))),
+    aimX: _num(s.aimX, 0),
+    aimY: _num(s.aimY, 0),
+    dash: !!s.dash,
+    focus: !!s.focus,
+    shoot: !!s.shoot,
+    fm: String(s.fm || s.focusModeId || "chrono").slice(0, 32),
+  };
+}
+
+function _makeFakeInput(ni){
+  const s = ni || { mvx: 0, mvy: 0, aimX: 0, aimY: 0, dash: false, shoot: false };
+  return {
+    move: { x: _num(s.mvx, 0), y: _num(s.mvy, 0) },
+    mouseWorld: { x: _num(s.aimX, 0), y: _num(s.aimY, 0) },
+    mouseDown: !!s.shoot,
+    _dashOnce: !!s.dash,
+    consumePressed(code){
+      if(code === "ShiftLeft" || code === "ShiftRight"){
+        if(this._dashOnce){
+          this._dashOnce = false;
+          return true;
+        }
+      }
+      return false;
+    }
   };
 }
 
@@ -144,6 +263,22 @@ function _coerceNetState(s){
   };
 }
 
+function _applySelfAuth(game, st){
+  if(!game || !game.player || !st) return;
+  const p = game.player;
+  p.x = _num(st.x, p.x);
+  p.y = _num(st.y, p.y);
+  p.face = _num(st.face, p.face);
+  p.invuln = _num(st.invuln, p.invuln);
+  p.dashTime = _num(st.dashTime, p.dashTime);
+  p.stageFxType = String(st.stageFxType || p.stageFxType || "none").slice(0, 16);
+  p.stageFxA = _num(st.stageFxA, p.stageFxA);
+
+  // prevent local velocity from fighting the authoritative position
+  if("vx" in p) p.vx = 0;
+  if("vy" in p) p.vy = 0;
+}
+
 function _applyPartySnapshot(snap){
   if(!snap || typeof snap !== "object") return;
   const runId = (snap.runId|0) || 0;
@@ -151,13 +286,17 @@ function _applyPartySnapshot(snap){
   if(runId !== (mp.runId|0)) mp.resetForRun(runId);
 
   const players = Array.isArray(snap.players) ? snap.players : [];
-  const selfId = lobby ? String(lobby.selfId || "") : "";
+  const selfId = _resolveMyId(lobby);
   const seen = new Set();
 
   for(const e of players){
     const id = e && e.id ? String(e.id) : "";
     if(!id) continue;
-    if(selfId && id === selfId) continue; // never override local player
+    if(selfId && id === selfId){
+      // In No.4 we *do* use self snapshot for authoritative correction (client only).
+      mp.selfAuth = _coerceNetState(e);
+      continue;
+    }
     const st = _coerceNetState(e);
     if(!st) continue;
 
@@ -215,19 +354,22 @@ lobby.onStart = (cfg, runId=0) => {
   // Start is driven by the host; everyone starts with the same config.
   mp.resetForRun(runId|0);
   if(engineRef && typeof engineRef.startRun === "function") engineRef.startRun(cfg || null);
+  // After a full wipe (everyone died), some browsers can leave us visually stranded.
+  // Force the run scene immediately.
+  if(scenes && typeof scenes.set === "function") scenes.set("run", null, { instant: true });
 };
 
 
 
-// No.3: player visibility channel (host aggregates -> snapshot)
+// No.4: input/snapshot channel
 lobby.onGameInput = (msg) => {
-  // Host collects latest client avatar states (temporary No.3 behavior).
+  // Host collects latest client INPUT.
   if(!(lobby && lobby.connected && lobby.isHost)) return;
   const from = String(msg && msg.from || "");
   if(!from) return;
-  const st = _coerceNetState(msg && msg.input);
-  if(!st) return;
-  mp.lastClientState.set(from, st);
+  const ni = _coerceNetInput(msg && msg.input);
+  if(!ni) return;
+  mp.lastClientInput.set(from, ni);
 };
 
 lobby.onGameSnapshot = (msg) => {
