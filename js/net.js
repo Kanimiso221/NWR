@@ -111,7 +111,14 @@ export class LobbyClient {
   }
 
   start(){
-    this._send({ t:"start" });
+    this.startWithConfig(null);
+  }
+
+  // No.2: start config distribution (host decides, server relays)
+  startWithConfig(cfg){
+    const msg = { t:"start" };
+    if(cfg && typeof cfg === "object") msg.cfg = cfg;
+    this._send(msg);
   }
 
   // No.1: game channel helpers
@@ -207,7 +214,9 @@ export class LobbyClient {
       }
 
       if(msg.t === "start"){
-        if(this.onStart) this.onStart();
+        const cfg = msg.cfg || msg.config || null;
+        const runId = (msg.runId|0) || 0;
+        if(this.onStart) this.onStart(cfg, runId);
         return;
       }
 

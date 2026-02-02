@@ -225,12 +225,30 @@ export class Game {
     this.shakeX = 0;
     this.shakeY = 0;
 
-    this._rng = this._makeRng((Math.random() * 1e9) | 0);
+    // No.2: run seed (for deterministic room/stage layouts when starting from a shared config)
+    this.seed = 1;
+    this._rng = this._makeRng(this.seed);
 
     this.reset();
   }
 
-  reset() {
+  _randSeed32() {
+    try {
+      const r = new Uint32Array(1);
+      crypto.getRandomValues(r);
+      return (r[0] >>> 0) || 1;
+    } catch (_e) {
+      return (((Math.random() * 0xFFFFFFFF) >>> 0) || 1);
+    }
+  }
+
+  reset(startCfg = null) {
+    // Reset RNG each run.
+    const cfg = (startCfg && typeof startCfg === "object") ? startCfg : null;
+    const seedIn = (cfg && typeof cfg.seed === "number" && isFinite(cfg.seed)) ? (cfg.seed >>> 0) : 0;
+    this.seed = seedIn || this._randSeed32();
+    this._rng = this._makeRng(this.seed);
+
     this.player = new Player(0, 0);
     this._focusExhausted = false;
     this._focusHeldPrev = false;
@@ -274,8 +292,10 @@ export class Game {
     this.timeScale = 1;
   }
 
-  start(focusModeId) {
-    this.reset();
+  start(focusModeIdOrCfg) {
+    const cfg = (focusModeIdOrCfg && typeof focusModeIdOrCfg === "object") ? focusModeIdOrCfg : null;
+    const focusModeId = cfg ? cfg.focusModeId : focusModeIdOrCfg;
+    this.reset(cfg);
     if (focusModeId) this.focusModeId = String(focusModeId);
     this.state = "playing";
     if (this.roomIsBoss) {

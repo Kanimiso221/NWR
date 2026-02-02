@@ -14,6 +14,12 @@ const ALLOWED_ORIGINS = new Set([
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
+function _randSeed32(){
+  const r = new Uint32Array(1);
+  crypto.getRandomValues(r);
+  return (r[0] >>> 0) || 1;
+}
+
 function _isWsUpgrade(request) {
   const u = request.headers.get("Upgrade");
   return u && u.toLowerCase() === "websocket";
@@ -101,6 +107,10 @@ export class Room extends DurableObject {
 
     this.clients = new Map();
     this.hostId = "";
+
+    // No.2: start config distribution
+    this.runId = 0;
+    this.startCfg = null;
   }
 
   async fetch(request) {
@@ -171,7 +181,19 @@ export class Room extends DurableObject {
           _json(server, { t: "err", code: "not_ready" });
           return;
         }
-        this._broadcast({ t: "start" });
+        // No.2: distribute a shared start config (seed, focus mode, etc.)
+        const inCfg = (data.cfg && typeof data.cfg === "object") ? data.cfg : null;
+        const cfg = {
+          seed: (inCfg && typeof inCfg.seed === "number" && isFinite(inCfg.seed)) ? (inCfg.seed >>> 0) : _randSeed32(),
+          focusModeId: (inCfg && typeof inCfg.focusModeId === "string") ? inCfg.focusModeId.slice(0, 32) : "chrono",
+          room: 1,
+          hostId: this.hostId,
+        };
+        this.runId = (this.runId | 0) + 1;
+        this.startCfg = cfg;
+
+        // Start signal (back-compat): now includes cfg + runId.
+        this._broadcast({ t: "start", cfg, runId: this.runId });
         return;
       }
 

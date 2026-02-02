@@ -37,9 +37,9 @@ lobby.onState = (view) => {
 lobby.onClosed = (reason) => {
   if(ui && typeof ui.setMultiplayerState === "function") ui.setMultiplayerState({ error: String(reason || "") });
 };
-lobby.onStart = () => {
-  // Start is driven by the host, but everyone (including host) starts on this signal.
-  if(engineRef && typeof engineRef.startRun === "function") engineRef.startRun();
+lobby.onStart = (cfg) => {
+  // Start is driven by the host; everyone starts with the same config.
+  if(engineRef && typeof engineRef.startRun === "function") engineRef.startRun(cfg || null);
 };
 
 // Wire UI -> lobby
@@ -70,7 +70,11 @@ if(ui && typeof ui.onMpReady === "function"){
 if(ui && typeof ui.onMpStart === "function"){
   ui.onMpStart(() => {
     // START is host-only and triggers a room-wide start signal
-    if(lobby && lobby.connected && lobby.isHost) lobby.start();
+    if(!(lobby && lobby.connected && lobby.isHost)) return;
+
+    const seed = _newSeed32();
+    const focusModeId = _getSelectedFocusMode();
+    lobby.startWithConfig({ seed, focusModeId, room: 1 });
   });
 }
 
@@ -234,7 +238,9 @@ ui.onStart(() => {
   // If connected to a lobby: host starts (broadcast), clients wait.
   if(lobby && lobby.connected){
     if(lobby.isHost){
-      lobby.start();
+      const seed = _newSeed32();
+      const focusModeId = _getSelectedFocusMode();
+      lobby.startWithConfig({ seed, focusModeId, room: 1 });
     }
     return;
   }
@@ -311,6 +317,17 @@ scenes.register("gameover", new GameOverScene(engine));
 // Expose scene-safe helpers so scenes can drive flow without main.js glue.
 engine.unlockAudioOnce = unlockAudioOnce;
 
+function _newSeed32(){
+  try{
+    const r = new Uint32Array(1);
+    crypto.getRandomValues(r);
+    // avoid 0 seed
+    return (r[0] >>> 0) || 1;
+  }catch(_e){
+    return (((Math.random() * 0xFFFFFFFF) >>> 0) || 1);
+  }
+}
+
 function _getSelectedFocusMode(){
   if (ui && typeof ui.getFocusModeId === "function") return ui.getFocusModeId();
   try{
@@ -319,10 +336,26 @@ function _getSelectedFocusMode(){
   return "chrono";
 }
 
-engine.startRun = () => {
+engine.startRun = (startCfg=null) => {
   unlockAudioOnce();
+  let cfg = (startCfg && typeof startCfg === "object") ? startCfg : null;
+  let focusModeId = _getSelectedFocusMode();
+  if (cfg && cfg.focusModeId) focusModeId = String(cfg.focusModeId);
+  // Keep UI selection in sync with host-chosen mode.
+  try{
+    if (ui && cfg && cfg.focusModeId && typeof ui.setSelectedFocusModeId === "function") {
+      ui.setSelectedFocusModeId(String(cfg.focusModeId), false);
+    }
+  }catch(_e){}
+
   if (ui) ui.hide();
-  game.start(_getSelectedFocusMode());
+  // Game.start accepts either focusModeId (string) or a start config object.
+  if (cfg) {
+    cfg = Object.assign({}, cfg, { focusModeId });
+    game.start(cfg);
+  } else {
+    game.start(focusModeId);
+  }
   scenes.set("run"); // fades nicely from title
 };
 
