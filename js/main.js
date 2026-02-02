@@ -53,6 +53,10 @@ const mp = {
   // client: last authoritative state for myself
   selfAuth: null,
 
+  // last start config we received (for resync / self-heal)
+  lastStartCfg: null,
+  lastStartCfgRunId: 0,
+
   _sendAcc: 0,
   _snapAcc: 0,
 
@@ -117,8 +121,10 @@ const mp = {
       }
 
       const ni = this.lastClientInput.get(id) || null;
-      // Approx: treat Space as "focus active" for visuals.
-      p.focusActive = !!(ni && ni.focus);
+      // Approx: treat Space/FA as "focus active" for visuals.
+      // Prefer the client's computed focus-active flag if present.
+      const fa = (ni && (ni.fa === true || ni.fa === false)) ? ni.fa : !!(ni && ni.focus);
+      p.focusActive = !!fa;
       p.focusModeId = (ni && ni.fm) ? ni.fm : (p.focusModeId || "chrono");
 
       const fakeInput = _makeFakeInput(ni);
@@ -198,6 +204,8 @@ function _packNetInput(game, input){
 
   const dash = !!(input && typeof input.peekPressed === "function" && (input.peekPressed("ShiftLeft") || input.peekPressed("ShiftRight")));
   const focus = !!(input && typeof input.isDown === "function" && (input.isDown("Space") || input.isDown("Spacebar")));
+
+  const fa = !!(game && game.player && game.player.focusActive);
   const shoot = !!(input && input.mouse && input.mouse.down);
 
   const cam = (game && game.camera) ? game.camera : { x: 0, y: 0 };
@@ -207,7 +215,7 @@ function _packNetInput(game, input){
   const aimY = my + _num(cam.y, 0);
 
   const fm = String((game && game.focusModeId) || (game && game.player && game.player.focusModeId) || "chrono").slice(0, 32);
-  return { mvx, mvy, aimX, aimY, dash: dash ? 1 : 0, focus: focus ? 1 : 0, shoot: shoot ? 1 : 0, fm };
+  return { mvx, mvy, aimX, aimY, dash: dash ? 1 : 0, focus: focus ? 1 : 0, fa: fa ? 1 : 0, shoot: shoot ? 1 : 0, fm };
 }
 
 function _coerceNetInput(s){
@@ -219,6 +227,7 @@ function _coerceNetInput(s){
     aimY: _num(s.aimY, 0),
     dash: !!s.dash,
     focus: !!s.focus,
+    fa: !!s.fa,
     shoot: !!s.shoot,
     fm: String(s.fm || s.focusModeId || "chrono").slice(0, 32),
   };
@@ -353,6 +362,8 @@ lobby.onClosed = (reason) => {
 lobby.onStart = (cfg, runId=0) => {
   // Start is driven by the host; everyone starts with the same config.
   mp.resetForRun(runId|0);
+  mp.lastStartCfg = (cfg && typeof cfg === "object") ? cfg : null;
+  mp.lastStartCfgRunId = (runId|0) || 0;
   if(engineRef && typeof engineRef.startRun === "function") engineRef.startRun(cfg || null);
   // After a full wipe (everyone died), some browsers can leave us visually stranded.
   // Force the run scene immediately.
@@ -373,11 +384,27 @@ lobby.onGameInput = (msg) => {
 };
 
 lobby.onGameSnapshot = (msg) => {
+  const snap = (msg && (msg.snap || msg.state)) || null;
+  const runId = (snap && (snap.runId|0)) || 0;
+
+  // IMPORTANT: host restarts reset tick to 0. We must detect run changes BEFORE
+  // applying the monotonic tick gate, or clients can ignore every snapshot forever.
+  if(runId && runId !== (mp.runId|0)){
+    mp.resetForRun(runId);
+  }
+
   const tick = (msg && msg.tick != null) ? (msg.tick|0) : -1;
   if(tick >= 0 && tick <= (mp.lastSnapTick|0)) return;
   mp.lastSnapTick = tick;
-  const snap = (msg && (msg.snap || msg.state)) || null;
+
   _applyPartySnapshot(snap);
+
+  // Self-heal: if a client missed the start message, snapshots can still pull them into the run.
+  if(lobby && lobby.connected && !lobby.isHost && engineRef && game && game.state !== "playing" && runId){
+    const cfg = (mp.lastStartCfg && ((mp.lastStartCfgRunId|0) === runId)) ? mp.lastStartCfg : { seed: _newSeed32(), focusModeId: _getSelectedFocusMode(), room: 1 };
+    if(typeof engineRef.startRun === "function") engineRef.startRun(cfg);
+    if(scenes && typeof scenes.set === "function") scenes.set("run", null, { instant: true });
+  }
 };
 // Wire UI -> lobby
 if(ui && typeof ui.onMpServerChange === "function"){
