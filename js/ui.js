@@ -1,14 +1,37 @@
 import { clamp } from "./math.js";
 import { listFocusModes, getFocusMode, defaultFocusModeId } from "./focus_modes.js";
+import { DEFAULT_LOBBY_SERVER } from "./net.js";
 
 export class UI {
-  constructor(){
+  constructor() {
     this.overlay = document.getElementById("overlay");
     this.overlayDesc = document.getElementById("overlayDesc");
     this.startBtn = document.getElementById("startBtn");
     this.resumeBtn = document.getElementById("resumeBtn");
     this.restartBtn = document.getElementById("restartBtn");
     this.menuButtons = document.getElementById("menuButtons");
+
+
+    // Back to title button (created dynamically for patch compatibility)
+    this.titleBtn = document.getElementById("titleBtn");
+    if (!this.titleBtn && this.menuButtons) {
+      const b = document.createElement("button");
+      b.id = "titleBtn";
+      b.textContent = "TITLE";
+      b.className = "hidden";
+      // Put it between RESUME and RESTART if possible
+      if (this.restartBtn && this.restartBtn.parentElement === this.menuButtons) {
+        this.menuButtons.insertBefore(b, this.restartBtn);
+      } else {
+        this.menuButtons.appendChild(b);
+      }
+      this.titleBtn = b;
+    }
+    this._onBackToTitle = null;
+    this.titleBtn?.addEventListener?.("click", () => {
+      if (this._onBackToTitle) this._onBackToTitle();
+    });
+
 
     this.rewardArea = document.getElementById("rewardArea");
     this.rewardTitle = document.getElementById("rewardTitle");
@@ -36,11 +59,11 @@ export class UI {
     this.forceEl = document.getElementById("force");
     this.buildEl = document.getElementById("build");
 
-	    // Settings panel toggle (audio + motion). UI-only; gameplay unaffected.
-	    this.settingsBtn = document.getElementById("settingsBtn");
-	    this.settingsPanel = document.getElementById("settingsPanel");
-	    this._settingsOpen = (this._safeGet("nw_settingsOpen") === "1");
-	    this._applySettingsOpen();
+    // Settings panel toggle (audio + motion). UI-only; gameplay unaffected.
+    this.settingsBtn = document.getElementById("settingsBtn");
+    this.settingsPanel = document.getElementById("settingsPanel");
+    this._settingsOpen = (this._safeGet("nw_settingsOpen") === "1");
+    this._applySettingsOpen();
 
     // HUD debug toggle: hide noisy info (build/map/best) by default.
     // Press F1 to toggle (stored in localStorage).
@@ -60,13 +83,13 @@ export class UI {
       { passive: false }
     );
 
-	    // Settings panel toggle
-	    if(this.settingsBtn && this.settingsPanel){
-	      this.settingsBtn.addEventListener("click", (e)=>{
-	        if(e) e.preventDefault();
-	        this.setSettingsOpen(!this._settingsOpen);
-	      });
-	    }
+    // Settings panel toggle
+    if (this.settingsBtn && this.settingsPanel) {
+      this.settingsBtn.addEventListener("click", (e) => {
+        if (e) e.preventDefault();
+        this.setSettingsOpen(!this._settingsOpen);
+      });
+    }
 
     this.muteChk = document.getElementById("muteChk");
     this.motionChk = document.getElementById("motionChk");
@@ -142,7 +165,7 @@ export class UI {
 
     // Multiplayer UI (title/gameover)
     this._mpView = {
-      server: this._safeGet("nw_lobbyServer") || "https://nwr-lobby.kasuteranight.workers.dev",
+      server: DEFAULT_LOBBY_SERVER,
       name: this._safeGet("nw_playerName") || "",
       connecting: false,
       connected: false,
@@ -157,86 +180,88 @@ export class UI {
     this._ensureMultiplayerUI();
     this._wireMultiplayerUI();
     this.setMultiplayerState(this._mpView);
+    this._ensurePartyHUD();
+    this._updatePartyHudVisibility();
     // Wire optional sliders if present (realtime while dragging)
     this._wireVolumeSlider(this.bgmVol, this.bgmPct, (v) => {
       this._bgmVal = v;
-      if(this._onBgmVol) this._onBgmVol(v);
+      if (this._onBgmVol) this._onBgmVol(v);
     });
     this._wireVolumeSlider(this.sfxVol, this.sfxPct, (v) => {
       this._sfxVal = v;
-      if(this._onSfxVol) this._onSfxVol(v);
+      if (this._onSfxVol) this._onSfxVol(v);
     });
 
     // shop buttons (safe even if hidden)
     this.shopRerollBtn?.addEventListener("click", () => {
-      if(this._onRerollShop) this._onRerollShop();
+      if (this._onRerollShop) this._onRerollShop();
     });
     this.shopLeaveBtn?.addEventListener("click", () => {
-      if(this._onLeaveShop) this._onLeaveShop();
+      if (this._onLeaveShop) this._onLeaveShop();
     });
 
     // keep initial % labels correct
     queueMicrotask(() => {
-      if(this.bgmPct) this.bgmPct.textContent = `${Math.round(this.bgmVolume * 100)}%`;
-      if(this.sfxPct) this.sfxPct.textContent = `${Math.round(this.sfxVolume * 100)}%`;
+      if (this.bgmPct) this.bgmPct.textContent = `${Math.round(this.bgmVolume * 100)}%`;
+      if (this.sfxPct) this.sfxPct.textContent = `${Math.round(this.sfxVolume * 100)}%`;
     });
   }
 
   // ------------------------------
   // HUD
   // ------------------------------
-  setBest(v){
-    if(this.bestEl) this.bestEl.textContent = String(v|0);
+  setBest(v) {
+    if (this.bestEl) this.bestEl.textContent = String(v | 0);
   }
 
-  updateHUD({hp, hpMax, focus, focusMax, score, combo, room, force, buildText, mapName, mapGimmick, roomTitle}){
+  updateHUD({ hp, hpMax, focus, focusMax, score, combo, room, force, buildText, mapName, mapGimmick, roomTitle }) {
     const hpT = clamp(hp / hpMax, 0, 1);
     const fT = clamp(focus / focusMax, 0, 1);
     this.hpBar.style.transform = `scaleX(${hpT})`;
     this.focusBar.style.transform = `scaleX(${fT})`;
 
     // numeric meters (current / max)
-    if(this.hpText){
+    if (this.hpText) {
       const hi = Math.max(0, Math.min(Math.round(hp), Math.round(hpMax || 0)));
       const hm = Math.max(1, Math.round(hpMax || 0));
       this.hpText.textContent = `${hi}/${hm}`;
     }
-    if(this.focusText){
+    if (this.focusText) {
       const fi = Math.max(0, Math.min(Math.round(focus), Math.round(focusMax || 0)));
       const fm = Math.max(1, Math.round(focusMax || 0));
       this.focusText.textContent = `${fi}/${fm}`;
     }
 
-    this.scoreEl.textContent = String(score|0);
+    this.scoreEl.textContent = String(score | 0);
     const c = Number(combo);
     this.comboEl.textContent = (c > 1) ? `COMBO x${c.toFixed(1)}` : "";
-    if(this.roomEl) this.roomEl.textContent = String(room|0);
+    if (this.roomEl) this.roomEl.textContent = String(room | 0);
 
-    if(this.mapNameEl) this.mapNameEl.textContent = mapName || "";
-    if(this.mapGimmickEl) {
+    if (this.mapNameEl) this.mapNameEl.textContent = mapName || "";
+    if (this.mapGimmickEl) {
       const rt = (roomTitle && String(roomTitle).trim()) ? String(roomTitle).trim() : "";
       const gg = (mapGimmick && String(mapGimmick).trim()) ? String(mapGimmick).trim() : "";
-      if(rt && gg) this.mapGimmickEl.textContent = `${rt}: ${gg}`;
+      if (rt && gg) this.mapGimmickEl.textContent = `${rt}: ${gg}`;
       else this.mapGimmickEl.textContent = rt || gg || "";
     }
-    if(this.stageLineEl) this.stageLineEl.style.display = (mapName || mapGimmick || roomTitle) ? "" : "none";
-    if(this.forceEl) this.forceEl.textContent = String(force|0);
-    if(this.buildEl) this.buildEl.textContent = buildText || "Build: -";
+    if (this.stageLineEl) this.stageLineEl.style.display = (mapName || mapGimmick || roomTitle) ? "" : "none";
+    if (this.forceEl) this.forceEl.textContent = String(force | 0);
+    if (this.buildEl) this.buildEl.textContent = buildText || "Build: -";
   }
 
   // ------------------------------
   // Overlay visibility
   // ------------------------------
-  show(mode){
+  show(mode) {
     const m = String(mode || "");
     this._mode = m;
     this.overlay.classList.add("show");
 
     // Enable scene-specific CSS (panel accent, background tint, etc.)
-    try{
+    try {
       this.overlay.dataset.mode = m;
       document.body.dataset.scene = m;
-    }catch(e){}
+    } catch (e) { }
 
     const isTitle = m === "title";
     const isPause = m === "pause";
@@ -244,26 +269,33 @@ export class UI {
     const isReward = m === "reward";
     const isShop = m === "shop";
 
+    // Force wide title layout even if data-mode attr is missing/mismatched
+    const panel = this.overlay ? this.overlay.querySelector(".panel") : null;
+    if (panel) panel.classList.toggle("panelWideTitle", isTitle);
+
     this.startBtn.classList.toggle("hidden", !(isTitle));
     this.resumeBtn.classList.toggle("hidden", !(isPause));
     this.restartBtn.classList.toggle("hidden", !(isOver || isPause));
+    if (this.titleBtn) this.titleBtn.classList.toggle("hidden", !(isPause));
 
     // reward/shop should hide the main menu buttons
     this.menuButtons.classList.toggle("hidden", isReward || isShop);
 
     this.rewardArea.classList.toggle("hidden", !isReward);
-    if(this.shopArea) this.shopArea.classList.toggle("hidden", !isShop);
+    if (this.shopArea) this.shopArea.classList.toggle("hidden", !isShop);
 
-    if(this.focusArea){
+    if (this.focusArea) {
       const showFocus = isTitle || isOver;
       this.focusArea.classList.toggle("hidden", !showFocus);
     }
 
-    if(this.mpArea){
+    if (this.mpArea) {
       const showMp = isTitle || isOver;
       this.mpArea.classList.toggle("hidden", !showMp);
     }
 
+
+    this._updatePartyHudVisibility();
 
     // Hide audio controls while choosing upgrades or in the shop.
     // Keep Reduced motion visible (user can still toggle perf).
@@ -271,27 +303,28 @@ export class UI {
     this._setAudioVisible(!hideAudio);
   }
 
-  hide(){
+  hide() {
     this._mode = "hidden";
     this.overlay.classList.remove("show");
 
     // Back to gameplay styling
-    try{
+    try {
       this.overlay.dataset.mode = "";
       document.body.dataset.scene = "run";
-    }catch(e){}
+    } catch (e) { }
     this.menuButtons.classList.remove("hidden");
     this.rewardArea.classList.add("hidden");
-    if(this.shopArea) this.shopArea.classList.add("hidden");
+    if (this.shopArea) this.shopArea.classList.add("hidden");
 
     // In hidden/menu modes, show audio controls again.
     this._setAudioVisible(true);
+    this._updatePartyHudVisibility();
   }
 
   // ------------------------------
   // Reward
   // ------------------------------
-  showReward(room, choices, isBoss=false){
+  showReward(room, choices, isBoss = false) {
     this.rewardTitle.textContent = isBoss ? "BOSS CLEARED: CHOOSE 1 RELIC" : "CHOOSE 1 UPGRADE";
     this.rewardCards.innerHTML = "";
     this._mode = "reward";
@@ -305,7 +338,7 @@ export class UI {
     };
 
     const pick = (u) => {
-      if(this._onPick) this._onPick(u);
+      if (this._onPick) this._onPick(u);
     };
 
     choices.forEach((u, idx) => {
@@ -323,7 +356,7 @@ export class UI {
         <div class="name">${u.name}</div>
         <div class="stats">${stats}</div>
         <div class="desc">${desc}</div>
-        <div class="hint">CLICK • [${idx+1}]</div>
+        <div class="hint">CLICK • [${idx + 1}]</div>
       `;
 
       card.addEventListener("mouseenter", () => setSelected(idx));
@@ -331,15 +364,15 @@ export class UI {
       card.addEventListener("click", () => pick(u));
 
       card.addEventListener("keydown", (e) => {
-        if(e.key === "ArrowLeft"){
+        if (e.key === "ArrowLeft") {
           e.preventDefault();
           setSelected(selected - 1);
           this.rewardCards.querySelectorAll(".card")[selected]?.focus();
-        }else if(e.key === "ArrowRight"){
+        } else if (e.key === "ArrowRight") {
           e.preventDefault();
           setSelected(selected + 1);
           this.rewardCards.querySelectorAll(".card")[selected]?.focus();
-        }else if(e.key === "Enter" || e.key === " "){
+        } else if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           pick(u);
         }
@@ -350,24 +383,24 @@ export class UI {
     setSelected(0);
   }
 
-  onPickReward(fn){ this._onPick = fn; }
+  onPickReward(fn) { this._onPick = fn; }
 
   // ------------------------------
   // Shop
   // ------------------------------
-  showShop(room, force, stock, rerollCost, nextIsBoss=false){
-    if(!this.shopArea) return;
+  showShop(room, force, stock, rerollCost, nextIsBoss = false) {
+    if (!this.shopArea) return;
     this._mode = "shop";
     this.show("shop");
 
     this.shopTitle.textContent = nextIsBoss ? "SHOP (BOSS NEXT)" : "SHOP";
-    if(this.shopForce) this.shopForce.textContent = String(force|0);
-    if(this.shopRerollCost) this.shopRerollCost.textContent = String(rerollCost|0);
+    if (this.shopForce) this.shopForce.textContent = String(force | 0);
+    if (this.shopRerollCost) this.shopRerollCost.textContent = String(rerollCost | 0);
 
     this.shopCards.innerHTML = "";
 
     const buy = (idx) => {
-      if(this._onBuyShop) this._onBuyShop(idx);
+      if (this._onBuyShop) this._onBuyShop(idx);
     };
 
     stock.forEach((it, idx) => {
@@ -379,11 +412,11 @@ export class UI {
       const tag = rarity.toUpperCase();
       const stats = (it.stats || "").trim();
       const desc = (it.desc || "").trim();
-      const canAfford = (force|0) >= (it.cost|0);
+      const canAfford = (force | 0) >= (it.cost | 0);
       const sold = !!it.sold;
 
-      if(!canAfford) card.classList.add("disabled");
-      if(sold) card.classList.add("sold");
+      if (!canAfford) card.classList.add("disabled");
+      if (sold) card.classList.add("sold");
 
       const hint = sold ? "SOLD" : (canAfford ? "CLICK TO BUY" : "NOT ENOUGH FORCE");
 
@@ -392,20 +425,20 @@ export class UI {
         <div class="name">${it.name}</div>
         <div class="stats">${stats}</div>
         <div class="desc">${desc}</div>
-        <div class="cost">COST: <span class="num">${it.cost|0}</span></div>
+        <div class="cost">COST: <span class="num">${it.cost | 0}</span></div>
         <div class="hint">${hint}</div>
       `;
 
       card.addEventListener("click", () => {
-        if(sold) return;
-        if(!canAfford) return;
+        if (sold) return;
+        if (!canAfford) return;
         buy(idx);
       });
 
       card.addEventListener("keydown", (e) => {
-        if(e.key === "Enter" || e.key === " "){
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          if(sold || !canAfford) return;
+          if (sold || !canAfford) return;
           buy(idx);
         }
       });
@@ -414,40 +447,40 @@ export class UI {
     });
   }
 
-  onBuyShop(fn){ this._onBuyShop = fn; }
-  onRerollShop(fn){ this._onRerollShop = fn; }
-  onLeaveShop(fn){ this._onLeaveShop = fn; }
+  onBuyShop(fn) { this._onBuyShop = fn; }
+  onRerollShop(fn) { this._onRerollShop = fn; }
+  onLeaveShop(fn) { this._onLeaveShop = fn; }
 
   // ------------------------------
   // Audio hooks (main.js expects these names)
   // ------------------------------
-  onBgmVolumeChange(fn){ this._onBgmVol = fn; }
+  onBgmVolumeChange(fn) { this._onBgmVol = fn; }
 
   // main.js uses onSfxVolumeChange; older patches used onSeVolumeChange.
   // Provide both so either main.js works.
-  onSfxVolumeChange(fn){ this._onSfxVol = fn; }
-  onSeVolumeChange(fn){ this._onSfxVol = fn; }
+  onSfxVolumeChange(fn) { this._onSfxVol = fn; }
+  onSeVolumeChange(fn) { this._onSfxVol = fn; }
 
   // Some builds call this to push UI state from storage.
   // Accepts { muted, reducedMotion, bgm, sfx } (current) or { bgmVolume, sfxVolume/seVolume } (older).
-  setAudioUI(state={}){
-    if(!state || typeof state !== "object") return;
+  setAudioUI(state = {}) {
+    if (!state || typeof state !== "object") return;
 
-    if(this.muteChk && state.muted !== undefined) this.muteChk.checked = !!state.muted;
-    if(this.motionChk && state.reducedMotion !== undefined) this.motionChk.checked = !!state.reducedMotion;
+    if (this.muteChk && state.muted !== undefined) this.muteChk.checked = !!state.muted;
+    if (this.motionChk && state.reducedMotion !== undefined) this.motionChk.checked = !!state.reducedMotion;
 
     const bgm = (state.bgmVolume !== undefined) ? state.bgmVolume : state.bgm;
     const sfx =
       (state.sfxVolume !== undefined) ? state.sfxVolume :
-      (state.sfx !== undefined) ? state.sfx :
-      (state.seVolume !== undefined) ? state.seVolume :
-      state.se;
+        (state.sfx !== undefined) ? state.sfx :
+          (state.seVolume !== undefined) ? state.seVolume :
+            state.se;
 
-    if(this.bgmVol && bgm !== undefined){
+    if (this.bgmVol && bgm !== undefined) {
       this._setSlider01(this.bgmVol, this.bgmPct, bgm);
       this._bgmVal = clamp(Number(bgm) || 0, 0, 1);
     }
-    if(this.sfxVol && sfx !== undefined){
+    if (this.sfxVol && sfx !== undefined) {
       this._setSlider01(this.sfxVol, this.sfxPct, sfx);
       this._sfxVal = clamp(Number(sfx) || 0, 0, 1);
     }
@@ -456,22 +489,23 @@ export class UI {
   // ------------------------------
   // Menu hooks (main.js expects these)
   // ------------------------------
-  onStart(fn){ this.startBtn.addEventListener("click", fn); }
-  onResume(fn){ this.resumeBtn.addEventListener("click", fn); }
-  onRestart(fn){ this.restartBtn.addEventListener("click", fn); }
-  onMuteChange(fn){ this.muteChk.addEventListener("change", fn); }
-  onMotionChange(fn){ this.motionChk.addEventListener("change", fn); }
+  onStart(fn) { this.startBtn.addEventListener("click", fn); }
+  onResume(fn) { this.resumeBtn.addEventListener("click", fn); }
+  onRestart(fn) { this.restartBtn.addEventListener("click", fn); }
+  onBackToTitle(fn) { this._onBackToTitle = fn; }
+  onMuteChange(fn) { this.muteChk.addEventListener("change", fn); }
+  onMotionChange(fn) { this.motionChk.addEventListener("change", fn); }
 
-  get reducedMotion(){ return !!this.motionChk?.checked; }
-  get muted(){ return !!this.muteChk?.checked; }
+  get reducedMotion() { return !!this.motionChk?.checked; }
+  get muted() { return !!this.muteChk?.checked; }
 
   // main.js reads these directly.
-  get bgmVolume(){
-    if(this.bgmVol) return this._readSlider01(this.bgmVol);
+  get bgmVolume() {
+    if (this.bgmVol) return this._readSlider01(this.bgmVol);
     return clamp(Number(this._bgmVal) || 0, 0, 1);
   }
-  get sfxVolume(){
-    if(this.sfxVol) return this._readSlider01(this.sfxVol);
+  get sfxVolume() {
+    if (this.sfxVol) return this._readSlider01(this.sfxVol);
     return clamp(Number(this._sfxVal) || 0, 0, 1);
   }
 
@@ -479,36 +513,36 @@ export class UI {
   // ------------------------------
   // FOCUS mode select
   // ------------------------------
-  getSelectedFocusModeId(){
+  getSelectedFocusModeId() {
     return this._focusModeId || defaultFocusModeId();
   }
 
   // Back-compat: main.js expects this method name.
-  getFocusModeId(){
+  getFocusModeId() {
     return this.getSelectedFocusModeId();
   }
 
-  setSelectedFocusModeId(id, silent=false){
+  setSelectedFocusModeId(id, silent = false) {
     const m = getFocusMode(id);
     this._focusModeId = m.id;
-    if(!silent) this._safeSet("nw_focusModeId", m.id);
+    if (!silent) this._safeSet("nw_focusModeId", m.id);
 
-    if(this.focusDescEl){
+    if (this.focusDescEl) {
       const t = String(m.details || m.desc || m.tagline || "").trim();
       this.focusDescEl.textContent = t;
     }
 
-    if(this.focusCardsEl){
+    if (this.focusCardsEl) {
       const cards = Array.from(this.focusCardsEl.querySelectorAll(".focusCard"));
       cards.forEach((c) => c.classList.toggle("selected", (c.dataset.focusId === m.id)));
     }
   }
 
-  _ensureFocusUI(){
+  _ensureFocusUI() {
     const panel = this.overlay?.querySelector?.(".panel") || this.overlay;
     const before = document.getElementById("menuButtons") || null;
 
-    if(!this.focusArea){
+    if (!this.focusArea) {
       const area = document.createElement("div");
       area.id = "focusArea";
       area.className = "focusArea";
@@ -518,9 +552,9 @@ export class UI {
         <div id="focusDesc" class="focusDesc"></div>
         <p class="tiny focusHint">クリックで選択。1〜8でも選択。Spaceで発動。</p>
       `;
-      if(before && before.parentElement === panel){
+      if (before && before.parentElement === panel) {
         panel.insertBefore(area, before);
-      }else{
+      } else {
         panel.appendChild(area);
       }
       this.focusArea = area;
@@ -536,7 +570,7 @@ export class UI {
       || this.focusArea?.querySelector?.("#focusDesc")
       || null;
 
-    if(!this.focusCardsEl) return;
+    if (!this.focusCardsEl) return;
 
     this._focusModes = listFocusModes();
     this.focusCardsEl.innerHTML = "";
@@ -546,15 +580,15 @@ export class UI {
       card.className = "card focusCard";
       card.tabIndex = 0;
       card.dataset.focusId = m.id;
-      const tag = `MODE ${idx+1}`;
+      const tag = `MODE ${idx + 1}`;
       const stats = String(m.tagline || m.desc || "").trim();
 
       card.innerHTML = `
         <div class="tag">${tag}</div>
         <div class="name">${m.name}</div>
         <div class="desc">${stats}</div>
-        <div class="hint">CLICK • [${idx+1}]</div>
-      `;      const pick = () => this.setSelectedFocusModeId(m.id);
+        <div class="hint">CLICK • [${idx + 1}]</div>
+      `; const pick = () => this.setSelectedFocusModeId(m.id);
 
       // Click commits selection. Hover/focus only previews the description (doesn't change selection).
       const preview = () => {
@@ -580,7 +614,7 @@ export class UI {
       card.addEventListener("mouseleave", restore);
       card.addEventListener("blur", restore);
       card.addEventListener("keydown", (e) => {
-        if(e.key === "Enter" || e.key === " "){
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           pick();
         }
@@ -589,57 +623,58 @@ export class UI {
       this.focusCardsEl.appendChild(card);
     });
 
-    if(!this._focusKeyBound){
+    if (!this._focusKeyBound) {
       this._focusKeyBound = true;
       window.addEventListener("keydown", (e) => {
-        if(!this.overlay?.classList?.contains("show")) return;
-        if(!this.focusArea || this.focusArea.classList.contains("hidden")) return;
+        if (!this.overlay?.classList?.contains("show")) return;
+        if (!this.focusArea || this.focusArea.classList.contains("hidden")) return;
 
         const code = e.code || "";
         let n = -1;
-        if(code.startsWith("Digit")) n = Number(code.slice(5));
-        else if(code.startsWith("Numpad")) n = Number(code.slice(6));
+        if (code.startsWith("Digit")) n = Number(code.slice(5));
+        else if (code.startsWith("Numpad")) n = Number(code.slice(6));
 
-        if(n >= 1 && n <= 8){
+        if (n >= 1 && n <= 8) {
           e.preventDefault();
-          const mode = this._focusModes?.[n-1];
-          if(mode) this.setSelectedFocusModeId(mode.id);
+          const mode = this._focusModes?.[n - 1];
+          if (mode) this.setSelectedFocusModeId(mode.id);
         }
-      }, {passive:false});
+      }, { passive: false });
     }
   }
 
   // ------------------------------
   // Multiplayer (Lobby)
   // ------------------------------
-  onMpHost(fn){ this._onMpHost = fn; }
-  onMpJoin(fn){ this._onMpJoin = fn; }
-  onMpLeave(fn){ this._onMpLeave = fn; }
-  onMpReady(fn){ this._onMpReady = fn; }
-  onMpServerChange(fn){ this._onMpServerChange = fn; }
-  onMpNameChange(fn){ this._onMpNameChange = fn; }
+  onMpHost(fn) { this._onMpHost = fn; }
+  onMpJoin(fn) { this._onMpJoin = fn; }
+  onMpLeave(fn) { this._onMpLeave = fn; }
+  onMpReady(fn) { this._onMpReady = fn; }
+  onMpServerChange(fn) { this._onMpServerChange = fn; }
+  onMpNameChange(fn) { this._onMpNameChange = fn; }
 
-  getMpServer(){
-    return String(this.mpServerEl?.value || this._mpView.server || "").trim();
+  getMpServer() {
+    return DEFAULT_LOBBY_SERVER;
   }
-  getMpRoomCode(){
+  getMpRoomCode() {
     return String(this.mpRoomEl?.value || "").trim().toUpperCase();
   }
-  getMpName(){
+  getMpName() {
     return String(this.mpNameEl?.value || this._mpView.name || "").trim();
   }
 
-  setMultiplayerState(view={}){
+  setMultiplayerState(view = {}) {
     // Merge
     this._mpView = Object.assign({}, this._mpView || {}, view || {});
+    this._mpView.server = DEFAULT_LOBBY_SERVER;
 
-    if(this.mpServerEl){
-      const sv = String(this._mpView.server || "");
-      if(this.mpServerEl.value !== sv) this.mpServerEl.value = sv;
+    if (this.mpServerEl) {
+      const sv = DEFAULT_LOBBY_SERVER;
+      if (this.mpServerEl.value !== sv) this.mpServerEl.value = sv;
     }
-    if(this.mpNameEl){
+    if (this.mpNameEl) {
       const nv = String(this._mpView.name || "");
-      if(this.mpNameEl.value !== nv) this.mpNameEl.value = nv;
+      if (this.mpNameEl.value !== nv) this.mpNameEl.value = nv;
     }
 
     const connecting = !!this._mpView.connecting;
@@ -653,47 +688,47 @@ export class UI {
     const err = String(this._mpView.error || "");
 
     // Pill
-    if(this.mpPillEl){
+    if (this.mpPillEl) {
       let label = "OFFLINE";
       let cls = "state-off";
-      if(connecting){ label = "CONNECTING"; cls = "state-connecting"; }
-      else if(connected){ label = isHost ? "HOST" : "CLIENT"; cls = isHost ? "state-host" : "state-client"; }
+      if (connecting) { label = "CONNECTING"; cls = "state-connecting"; }
+      else if (connected) { label = isHost ? "HOST" : "CLIENT"; cls = isHost ? "state-host" : "state-client"; }
       this.mpPillEl.textContent = label;
-      this.mpPillEl.classList.remove("state-off","state-connecting","state-host","state-client");
+      this.mpPillEl.classList.remove("state-off", "state-connecting", "state-host", "state-client");
       this.mpPillEl.classList.add(cls);
     }
 
     // Buttons enabled
     const serverOk = !!this.getMpServer();
-    if(this.mpHostBtn){ this.mpHostBtn.disabled = connecting || connected || !serverOk; }
-    if(this.mpJoinBtn){ this.mpJoinBtn.disabled = connecting || connected || !serverOk || !this.getMpRoomCode(); }
-    if(this.mpRoomEl){ this.mpRoomEl.disabled = connecting || connected || !serverOk; }
-    if(this.mpLeaveBtn){ this.mpLeaveBtn.disabled = !connecting && !connected; }
-    if(this.mpReadyBtn){ this.mpReadyBtn.disabled = !connected; }
+    if (this.mpHostBtn) { this.mpHostBtn.disabled = connecting || connected || !serverOk; }
+    if (this.mpJoinBtn) { this.mpJoinBtn.disabled = connecting || connected || !serverOk || !this.getMpRoomCode(); }
+    if (this.mpRoomEl) { this.mpRoomEl.disabled = connecting || connected || !serverOk; }
+    if (this.mpLeaveBtn) { this.mpLeaveBtn.disabled = !connecting && !connected; }
+    if (this.mpReadyBtn) { this.mpReadyBtn.disabled = !connected; }
 
     // Room row
-    if(this.mpRoomRowEl){
+    if (this.mpRoomRowEl) {
       const show = connecting || connected;
       this.mpRoomRowEl.classList.toggle("hidden", !show);
     }
-    if(this.mpRoomLabelEl){
+    if (this.mpRoomLabelEl) {
       this.mpRoomLabelEl.textContent = room || "-----";
     }
-    if(this.mpCopyBtn){
+    if (this.mpCopyBtn) {
       this.mpCopyBtn.disabled = !room;
     }
 
     // Ready button label
-    if(this.mpReadyBtn){
+    if (this.mpReadyBtn) {
       this.mpReadyBtn.textContent = ready ? "READY ✓" : "READY";
       this.mpReadyBtn.classList.toggle("on", ready);
     }
 
     // Players list
-    if(this.mpPlayersEl){
-      if(!connected){
+    if (this.mpPlayersEl) {
+      if (!connected) {
         this.mpPlayersEl.innerHTML = "";
-      }else{
+      } else {
         const lines = members.map((m) => {
           const nm = String(m.name || "Player");
           const r = !!m.ready;
@@ -712,47 +747,225 @@ export class UI {
     }
 
     // Status line
-    if(this.mpStatusEl){
-      if(err){
+    if (this.mpStatusEl) {
+      if (err) {
         this.mpStatusEl.textContent = err;
-      }else if(connecting){
+      } else if (connecting) {
         this.mpStatusEl.textContent = "Connecting...";
-      }else if(connected){
-        if(isHost){
+      } else if (connected) {
+        if (isHost) {
           const allReady = members.length ? members.every(m => !!m.ready) : true;
           this.mpStatusEl.textContent = allReady ? "All ready. Press START." : "Waiting for READY...";
-        }else{
+        } else {
           this.mpStatusEl.textContent = "Waiting for host...";
         }
-      }else{
+      } else {
         this.mpStatusEl.textContent = "";
       }
     }
 
+    // Party HUD (in-run quick view)
+    this._updatePartyHud(members, { connected, room, hostId, selfId });
+
     // Start button behavior
-    if(this.startBtn){
-      if(connected){
-        if(isHost){
+    if (this.startBtn) {
+      if (connected) {
+        if (isHost) {
           const allReady = members.length ? members.every(m => !!m.ready) : true;
           this.startBtn.textContent = "START (HOST)";
           this.startBtn.disabled = !allReady;
-        }else{
+        } else {
           this.startBtn.textContent = "WAITING HOST";
           this.startBtn.disabled = true;
         }
-      }else{
+      } else {
         this.startBtn.textContent = "START";
         this.startBtn.disabled = false;
       }
     }
   }
 
-  _ensureMultiplayerUI(){
+  // ------------------------------
+  // Party HUD (shows current members during gameplay/pause)
+  // ------------------------------
+  _ensurePartyHUD() {
+    if (this._partyHudReady) return;
+    this._partyHudReady = true;
+    this._ensurePartyHUDStyle();
+
+    const hud = document.getElementById("hud");
+    if (!hud) return;
+
+    let box = document.getElementById("partyHud");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "partyHud";
+      box.className = "partyHud hidden";
+      box.innerHTML = `
+        <div class="partyHdr">
+          <span class="partyTitle">PARTY</span>
+          <span id="partyRoom" class="partyRoom"></span>
+        </div>
+        <div id="partyList" class="partyList"></div>
+      `;
+      hud.appendChild(box);
+    }
+    this.partyHud = box;
+    this.partyRoomEl = box.querySelector("#partyRoom");
+    this.partyListEl = box.querySelector("#partyList");
+  }
+
+  _ensurePartyHUDStyle() {
+    if (document.getElementById("partyHudStyle")) return;
+    const st = document.createElement("style");
+    st.id = "partyHudStyle";
+    st.textContent = `
+      .partyHud{
+        position: fixed;
+        right: 14px;
+        top: 14px;
+        z-index: 30;
+        width: min(320px, calc(100vw - 28px));
+        background: rgba(10, 12, 28, 0.60);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 14px;
+        padding: 10px 10px 8px;
+        color: rgba(255,255,255,0.92);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans JP", sans-serif;
+        backdrop-filter: blur(8px);
+      }
+      body[data-scene="run"] .partyHud{ backdrop-filter: none; } /* perf: no blur in run */
+      .partyHud.hidden{ display:none; }
+      .partyHdr{
+        display:flex;
+        align-items:baseline;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom: 6px;
+      }
+      .partyTitle{
+        letter-spacing: .06em;
+        font-weight: 700;
+        font-size: 12px;
+        opacity: .9;
+      }
+      .partyRoom{
+        font-size: 11px;
+        opacity: .7;
+      }
+      .partyList{
+        display:flex;
+        flex-direction:column;
+        gap: 4px;
+      }
+      .partyRow{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap: 10px;
+        padding: 6px 8px;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+      }
+      .partyRow.me{ border-color: rgba(255,255,255,0.18); }
+      .partyLeft{
+        display:flex;
+        align-items:center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .partyDot{
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.35);
+        flex: 0 0 auto;
+      }
+      .partyDot.ok{ background: rgba(120, 255, 200, 0.85); }
+      .partyDot.no{ background: rgba(255, 120, 180, 0.75); }
+      .partyName{
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+      }
+      .partyTags{
+        display:flex;
+        align-items:center;
+        gap: 6px;
+        flex: 0 0 auto;
+        font-size: 10px;
+        opacity: .85;
+      }
+      .partyTag{
+        padding: 2px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.06);
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  _updatePartyHud(members, { connected, room, hostId, selfId } = {}) {
+    if (!this.partyHud || !this.partyListEl) {
+      this._ensurePartyHUD();
+    }
+    if (!this.partyHud || !this.partyListEl) return;
+
+    if (!connected || !Array.isArray(members) || !members.length) {
+      this.partyListEl.innerHTML = "";
+      if (this.partyRoomEl) this.partyRoomEl.textContent = "";
+      this._updatePartyHudVisibility();
+      return;
+    }
+
+    if (this.partyRoomEl) {
+      const rc = String(room || "").trim().toUpperCase();
+      this.partyRoomEl.textContent = rc ? (`ROOM ${rc}`) : "";
+    }
+
+    const html = members.map((m) => {
+      const nm = String(m.name || "Player");
+      const r = !!m.ready;
+      const isH = (hostId && m.id) ? (m.id === hostId) : !!m.host;
+      const you = (selfId && m.id) ? (m.id === selfId) : false;
+      const tags = [];
+      if (isH) tags.push("HOST");
+      if (you && !isH) tags.push("YOU");
+      return `
+        <div class="partyRow ${you ? "me" : ""}">
+          <div class="partyLeft">
+            <span class="partyDot ${r ? "ok" : "no"}"></span>
+            <span class="partyName">${this._escapeHtml(nm)}</span>
+          </div>
+          <div class="partyTags">
+            ${tags.map(t => `<span class="partyTag">${t}</span>`).join("")}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    this.partyListEl.innerHTML = html;
+    this._updatePartyHudVisibility();
+  }
+
+  _updatePartyHudVisibility() {
+    if (!this.partyHud) return;
+    const connected = !!(this._mpView && this._mpView.connected);
+    const hasMembers = connected && Array.isArray(this._mpView.members) && this._mpView.members.length > 0;
+    const mode = String(this._mode || "");
+    const show = hasMembers && (mode === "hidden" || mode === "pause");
+    this.partyHud.classList.toggle("hidden", !show);
+  }
+
+  _ensureMultiplayerUI() {
     const panel = this.overlay?.querySelector?.(".panel") || this.overlay;
     const before = document.getElementById("menuButtons") || null;
 
     this.mpArea = document.getElementById("mpArea") || null;
-    if(!this.mpArea){
+    if (!this.mpArea) {
       const area = document.createElement("div");
       area.id = "mpArea";
       area.className = "mpArea";
@@ -765,7 +978,7 @@ export class UI {
         <div class="mpGrid">
           <label class="mpLine">
             <span class="mpLabel">Server</span>
-            <input id="mpServer" class="mpInput" placeholder="wss://your-worker.workers.dev" />
+            <input id="mpServer" class="mpInput" placeholder="https://nwr-lobby.kasuteranight.workers.dev" readonly disabled />
           </label>
           <label class="mpLine">
             <span class="mpLabel">Name</span>
@@ -797,9 +1010,9 @@ export class UI {
         </p>
       `;
 
-      if(before && before.parentElement === panel){
+      if (before && before.parentElement === panel) {
         panel.insertBefore(area, before);
-      }else{
+      } else {
         panel.appendChild(area);
       }
       this.mpArea = area;
@@ -812,7 +1025,7 @@ export class UI {
     this.mpJoinBtn = document.getElementById("mpJoinBtn") || null;
     this.mpRoomEl = document.getElementById("mpRoom") || document.getElementById("mpRoom") || null;
     // We used id="mpRoom" above
-    if(!this.mpRoomEl) this.mpRoomEl = document.getElementById("mpRoom");
+    if (!this.mpRoomEl) this.mpRoomEl = document.getElementById("mpRoom");
     this.mpPillEl = document.getElementById("mpPill") || null;
     this.mpRoomRowEl = document.getElementById("mpRoomRow") || null;
     this.mpRoomLabelEl = document.getElementById("mpRoomLabel") || null;
@@ -823,20 +1036,18 @@ export class UI {
     this.mpStatusEl = document.getElementById("mpStatus") || null;
 
     // Initial values
-    if(this.mpServerEl) this.mpServerEl.value = String(this._mpView.server || "");
-    if(this.mpNameEl) this.mpNameEl.value = String(this._mpView.name || "");
+    if (this.mpServerEl) {
+      this.mpServerEl.value = DEFAULT_LOBBY_SERVER;
+      this.mpServerEl.readOnly = true;
+      this.mpServerEl.disabled = true;
+      const line = this.mpServerEl.closest?.(".mpLine");
+      if (line) line.style.display = "none";
+    }
+    if (this.mpNameEl) this.mpNameEl.value = String(this._mpView.name || "");
   }
 
-  _wireMultiplayerUI(){
-    if(this.mpServerEl){
-      const onChange = () => {
-        const v = String(this.mpServerEl.value || "").trim();
-        this._mpView.server = v;
-        this._safeSet("nw_lobbyServer", v);
-        if(this._onMpServerChange) this._onMpServerChange(v);
-        this.setMultiplayerState(this._mpView);
-      };
-      this.mpServerEl.addEventListener("change", onChange);
+  _wireMultiplayerUI() {
+    if (this.mpServerEl) {
       this.mpServerEl.addEventListener("input", () => {
         // light refresh without spamming callbacks
         this._mpView.server = String(this.mpServerEl.value || "").trim();
@@ -844,48 +1055,47 @@ export class UI {
       });
     }
 
-    if(this.mpNameEl){
-      const onChange = () => {
+    if (this.mpNameEl) {
+      this.mpNameEl.addEventListener("change", () => {
         const v = String(this.mpNameEl.value || "").trim();
-        this._mpView.name = v;
-        this._safeSet("nw_playerName", v);
-        if(this._onMpNameChange) this._onMpNameChange(v);
-      };
-      this.mpNameEl.addEventListener("change", onChange);
+        this._mpView.name = v || "Player";
+        this._mpPersist?.();
+        this._mpRender?.();
+      });
     }
 
-    if(this.mpRoomEl){
+    if (this.mpRoomEl) {
       this.mpRoomEl.addEventListener("input", () => {
         this.setMultiplayerState(this._mpView);
       });
       this.mpRoomEl.addEventListener("keydown", (e) => {
-        if(e.key === "Enter"){
+        if (e.key === "Enter") {
           e.preventDefault();
-          if(this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
+          if (this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
         }
       });
     }
 
     this.mpHostBtn?.addEventListener("click", () => {
-      if(this._onMpHost) this._onMpHost();
+      if (this._onMpHost) this._onMpHost();
     });
     this.mpJoinBtn?.addEventListener("click", () => {
-      if(this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
+      if (this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
     });
     this.mpLeaveBtn?.addEventListener("click", () => {
-      if(this._onMpLeave) this._onMpLeave();
+      if (this._onMpLeave) this._onMpLeave();
     });
     this.mpReadyBtn?.addEventListener("click", () => {
-      if(this._onMpReady) this._onMpReady();
+      if (this._onMpReady) this._onMpReady();
     });
     this.mpCopyBtn?.addEventListener("click", async () => {
       const code = String(this._mpView.roomCode || "").trim();
-      if(!code) return;
+      if (!code) return;
       const text = code;
-      try{
-        if(navigator.clipboard && navigator.clipboard.writeText){
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(text);
-        }else{
+        } else {
           // fallback
           const ta = document.createElement("textarea");
           ta.value = text;
@@ -894,46 +1104,46 @@ export class UI {
           document.execCommand("copy");
           ta.remove();
         }
-        if(this.mpStatusEl) this.mpStatusEl.textContent = "Copied.";
+        if (this.mpStatusEl) this.mpStatusEl.textContent = "Copied.";
         setTimeout(() => {
-          if(this.mpStatusEl && this.mpStatusEl.textContent === "Copied.") this.mpStatusEl.textContent = "";
+          if (this.mpStatusEl && this.mpStatusEl.textContent === "Copied.") this.mpStatusEl.textContent = "";
         }, 900);
-      }catch(_){
-        if(this.mpStatusEl) this.mpStatusEl.textContent = "Copy failed.";
+      } catch (_) {
+        if (this.mpStatusEl) this.mpStatusEl.textContent = "Copy failed.";
       }
     });
   }
 
-  _escapeHtml(s){
+  _escapeHtml(s) {
     return String(s || "").replace(/[&<>\"']/g, (c) => {
-      if(c === "&") return "&amp;";
-      if(c === "<") return "&lt;";
-      if(c === ">") return "&gt;";
-      if(c === "\"") return "&quot;";
-      if(c === "'") return "&#39;";
+      if (c === "&") return "&amp;";
+      if (c === "<") return "&lt;";
+      if (c === ">") return "&gt;";
+      if (c === "\"") return "&quot;";
+      if (c === "'") return "&#39;";
       return c;
     });
   }
 
-  _safeGet(key){
-    try{ return localStorage.getItem(key); }catch(_e){ return null; }
+  _safeGet(key) {
+    try { return localStorage.getItem(key); } catch (_e) { return null; }
   }
 
-  _safeSet(key, val){
-    try{ localStorage.setItem(key, String(val)); }catch(_e){}
+  _safeSet(key, val) {
+    try { localStorage.setItem(key, String(val)); } catch (_e) { }
   }
 
-  _applyDebugHudClass(){
-    try{
+  _applyDebugHudClass() {
+    try {
       document.body.classList.toggle("debugHud", !!this._debugHud);
-    }catch(_e){}
+    } catch (_e) { }
   }
   // ------------------------------
   // Internal helpers
   // ------------------------------
-  _findAudioBlock(sliderEl, pctEl){
+  _findAudioBlock(sliderEl, pctEl) {
     const el = sliderEl || pctEl;
-    if(!el) return null;
+    if (!el) return null;
     return el.closest?.(".audioRow")
       || el.closest?.(".audio-ui")
       || el.closest?.(".audio")
@@ -941,32 +1151,32 @@ export class UI {
       || null;
   }
 
-	setSettingsOpen(open, persist=true){
-		this._settingsOpen = !!open;
-		if(persist) this._safeSet("nw_settingsOpen", this._settingsOpen ? "1" : "0");
-		this._applySettingsOpen();
-	}
-
-	_applySettingsOpen(){
-		if(this.settingsPanel) this.settingsPanel.classList.toggle("open", !!this._settingsOpen);
-		if(this.settingsBtn) this.settingsBtn.classList.toggle("active", !!this._settingsOpen);
-	}
-
-  _setAudioVisible(visible){
-    // Hide mute + BGM/SFX slider blocks; keep Reduced motion visible.
-    if(this._muteLabel) this._muteLabel.classList.toggle("hidden", !visible);
-    if(this._bgmBlock) this._bgmBlock.classList.toggle("hidden", !visible);
-    if(this._sfxBlock) this._sfxBlock.classList.toggle("hidden", !visible);
-	  if(this.settingsBtn) this.settingsBtn.classList.toggle("hidden", !visible);
-	  if(this.settingsPanel) this.settingsPanel.classList.toggle("hidden", !visible);
-	  if(!visible) this.setSettingsOpen(false, false);
+  setSettingsOpen(open, persist = true) {
+    this._settingsOpen = !!open;
+    if (persist) this._safeSet("nw_settingsOpen", this._settingsOpen ? "1" : "0");
+    this._applySettingsOpen();
   }
 
-  _wireVolumeSlider(sliderEl, pctEl, emit){
-    if(!sliderEl) return;
+  _applySettingsOpen() {
+    if (this.settingsPanel) this.settingsPanel.classList.toggle("open", !!this._settingsOpen);
+    if (this.settingsBtn) this.settingsBtn.classList.toggle("active", !!this._settingsOpen);
+  }
+
+  _setAudioVisible(visible) {
+    // Hide mute + BGM/SFX slider blocks; keep Reduced motion visible.
+    if (this._muteLabel) this._muteLabel.classList.toggle("hidden", !visible);
+    if (this._bgmBlock) this._bgmBlock.classList.toggle("hidden", !visible);
+    if (this._sfxBlock) this._sfxBlock.classList.toggle("hidden", !visible);
+    if (this.settingsBtn) this.settingsBtn.classList.toggle("hidden", !visible);
+    if (this.settingsPanel) this.settingsPanel.classList.toggle("hidden", !visible);
+    if (!visible) this.setSettingsOpen(false, false);
+  }
+
+  _wireVolumeSlider(sliderEl, pctEl, emit) {
+    if (!sliderEl) return;
     const update = () => {
       const v01 = this._readSlider01(sliderEl);
-      if(pctEl) pctEl.textContent = `${Math.round(v01 * 100)}%`;
+      if (pctEl) pctEl.textContent = `${Math.round(v01 * 100)}%`;
       emit(v01);
     };
     // input = realtime while dragging, change = final
@@ -974,28 +1184,28 @@ export class UI {
     sliderEl.addEventListener("change", update);
   }
 
-  _readSlider01(sliderEl){
+  _readSlider01(sliderEl) {
     const raw = Number(sliderEl.value);
     const max = Number(sliderEl.max || 1);
     const min = Number(sliderEl.min || 0);
-    if(!isFinite(raw) || !isFinite(max) || !isFinite(min) || max === min) return 0;
-    if(max > 1.5){
+    if (!isFinite(raw) || !isFinite(max) || !isFinite(min) || max === min) return 0;
+    if (max > 1.5) {
       // treat as 0..100 (or similar)
       return clamp((raw - min) / (max - min), 0, 1);
     }
     return clamp(raw, 0, 1);
   }
 
-  _setSlider01(sliderEl, pctEl, v01){
-    if(!sliderEl) return;
+  _setSlider01(sliderEl, pctEl, v01) {
+    if (!sliderEl) return;
     const v = clamp(Number(v01) || 0, 0, 1);
     const max = Number(sliderEl.max || 1);
     const min = Number(sliderEl.min || 0);
-    if(max > 1.5){
+    if (max > 1.5) {
       sliderEl.value = String(Math.round(min + v * (max - min)));
-    }else{
+    } else {
       sliderEl.value = String(v);
     }
-    if(pctEl) pctEl.textContent = `${Math.round(v * 100)}%`;
+    if (pctEl) pctEl.textContent = `${Math.round(v * 100)}%`;
   }
 }

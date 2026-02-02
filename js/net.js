@@ -14,6 +14,8 @@
 //     { t:"ready", ready:true|false }
 //     { t:"start" }  // host only
 
+export const DEFAULT_LOBBY_SERVER = "https://nwr-lobby.kasuteranight.workers.dev";
+
 function _safeJsonParse(s){
   try{ return JSON.parse(s); }catch(_){ return null; }
 }
@@ -43,7 +45,7 @@ function _encodeQS(params){
 export class LobbyClient {
   constructor(){
     this.ws = null;
-    this.server = "";
+    this.server = DEFAULT_LOBBY_SERVER;
     this.roomCode = "";
     this.selfId = "";
     this.isHost = false;
@@ -60,8 +62,9 @@ export class LobbyClient {
     this.onLog = null;        // (msg) => void
   }
 
-  setServer(url){
-    this.server = String(url || "").trim();
+  setServer(_url){
+    // Server is fixed for this project.
+    this.server = DEFAULT_LOBBY_SERVER;
     this._emit();
   }
 
@@ -114,13 +117,7 @@ export class LobbyClient {
   // --------------------
 
   _connect({mode, room, name}){
-    const server = String(this.server || "").trim();
-    if(!server){
-      this._lastErr = "Server URL is empty";
-      this._emit();
-      return false;
-    }
-
+    const server = DEFAULT_LOBBY_SERVER;
     // Close any previous session.
     this.leave("reconnect");
 

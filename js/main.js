@@ -235,6 +235,7 @@ ui.onStart(() => {
 });
 ui.onResume(() => { engine.resumeRun(); });
 ui.onRestart(() => { engine.restartRun(); });
+ui.onBackToTitle(() => { if(engine && typeof engine.backToTitle==="function") engine.backToTitle(); });
 ui.onMuteChange(() => {
   unlockAudioOnce();
   sfx.setMuted(ui.muted);

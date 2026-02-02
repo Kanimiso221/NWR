@@ -9,11 +9,17 @@ export class PauseScene {
   }
 
   update(dt) {
-    const { input } = this.engine;
+    const { input, ui } = this.engine;
+    if (ui) ui.show("pause");
 
     // Enter also resumes (Escape is handled globally by SceneManager).
     if (input && input.consumePressed("Enter")) {
       if (typeof this.engine.resumeRun === "function") this.engine.resumeRun();
+    }
+
+    // T/Q: back to title (abort run)
+    if (input && (input.consumePressed("KeyT") || input.consumePressed("KeyQ"))) {
+      if (typeof this.engine.backToTitle === "function") this.engine.backToTitle();
     }
   }
 

@@ -13,7 +13,12 @@ export class TitleScene {
 
     // Enter starts (same as clicking START).
     if (input && input.consumePressed("Enter")) {
-      if (typeof this.engine.startRun === "function") this.engine.startRun();
+      const ui = this.engine && this.engine.ui;
+      if (ui && ui.startBtn && typeof ui.startBtn.click === "function") {
+        ui.startBtn.click();
+      } else if (typeof this.engine.startRun === "function") {
+        this.engine.startRun();
+      }
     }
   }
 

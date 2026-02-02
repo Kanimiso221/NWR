@@ -277,10 +277,12 @@ body.debugHud #hudDebug{
 }
 
 /* Title/GameOver: use the wide screen (two-column layout) */
-@media (min-width: 980px){
+@media (min-width: 900px){
   #overlay[data-mode="title"] .panel,
-  #overlay[data-mode="gameover"] .panel{
-    width: min(1180px, 94vw);
+  body[data-scene="title"] #overlay .panel,
+  #overlay[data-mode="gameover"] .panel,
+  body[data-scene="gameover"] #overlay .panel{
+    width: min(1180px, 96vw);
     display: grid;
     grid-template-columns: 1.65fr 1fr;
     grid-template-areas:
@@ -288,57 +290,49 @@ body.debugHud #hudDebug{
       "mode mode"
       "desc desc"
       "focus mp"
-      "buttons buttons"
-      "settings settings"
-      "footer footer";
-    gap: 12px;
-    align-content: start;
+      "menu mp"
+      "settings mp"
+      "foot foot";
+    gap: 14px;
   }
-
   #overlay[data-mode="title"] .panelHeader,
-  #overlay[data-mode="gameover"] .panelHeader{ grid-area: header; }
-
+  body[data-scene="title"] #overlay .panelHeader,
+  #overlay[data-mode="gameover"] .panelHeader,
+  body[data-scene="gameover"] #overlay .panelHeader{ grid-area: header; }
   #overlay[data-mode="title"] .modeRow,
-  #overlay[data-mode="gameover"] .modeRow{ grid-area: mode; }
-
+  body[data-scene="title"] #overlay .modeRow,
+  #overlay[data-mode="gameover"] .modeRow,
+  body[data-scene="gameover"] #overlay .modeRow{ grid-area: mode; }
   #overlay[data-mode="title"] #overlayDesc,
-  #overlay[data-mode="gameover"] #overlayDesc{ grid-area: desc; }
-
+  body[data-scene="title"] #overlay #overlayDesc,
+  #overlay[data-mode="gameover"] #overlayDesc,
+  body[data-scene="gameover"] #overlay #overlayDesc{ grid-area: desc; }
   #overlay[data-mode="title"] #focusSelectArea,
-  #overlay[data-mode="gameover"] #focusSelectArea{
-    grid-area: focus;
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
-    padding: 12px 12px 10px 12px;
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 18px;
-    background: rgba(0,0,0,0.18);
-  }
-
+  body[data-scene="title"] #overlay #focusSelectArea,
+  #overlay[data-mode="gameover"] #focusSelectArea,
+  body[data-scene="gameover"] #overlay #focusSelectArea{ grid-area: focus; }
   #overlay[data-mode="title"] #mpArea,
-  #overlay[data-mode="gameover"] #mpArea{
-    grid-area: mp;
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
-    padding: 12px 12px 12px 12px;
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 18px;
-    background: rgba(0,0,0,0.18);
-  }
-
+  body[data-scene="title"] #overlay #mpArea,
+  #overlay[data-mode="gameover"] #mpArea,
+  body[data-scene="gameover"] #overlay #mpArea{ grid-area: mp; align-self: start; }
   #overlay[data-mode="title"] #menuButtons,
-  #overlay[data-mode="gameover"] #menuButtons{ grid-area: buttons; }
-
+  body[data-scene="title"] #overlay #menuButtons,
+  #overlay[data-mode="gameover"] #menuButtons,
+  body[data-scene="gameover"] #overlay #menuButtons{ grid-area: menu; }
   #overlay[data-mode="title"] #settingsPanel,
-  #overlay[data-mode="gameover"] #settingsPanel{ grid-area: settings; }
+  body[data-scene="title"] #overlay #settingsPanel,
+  #overlay[data-mode="gameover"] #settingsPanel,
+  body[data-scene="gameover"] #overlay #settingsPanel{ grid-area: settings; }
+  #overlay[data-mode="title"] .footerHint,
+  body[data-scene="title"] #overlay .footerHint,
+  #overlay[data-mode="gameover"] .footerHint,
+  body[data-scene="gameover"] #overlay .footerHint{ grid-area: foot; }
 
-  #overlay[data-mode="title"] #footerHint,
-  #overlay[data-mode="gameover"] #footerHint{ grid-area: footer; }
-
+  /* keep party list compact */
   #overlay[data-mode="title"] .mpPlayers,
-  #overlay[data-mode="gameover"] .mpPlayers{
+  body[data-scene="title"] #overlay .mpPlayers,
+  #overlay[data-mode="gameover"] .mpPlayers,
+  body[data-scene="gameover"] #overlay .mpPlayers{
     max-height: 240px;
     overflow: auto;
   }

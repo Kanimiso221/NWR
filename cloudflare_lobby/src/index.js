@@ -14,78 +14,78 @@ const ALLOWED_ORIGINS = new Set([
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-function _isWsUpgrade(request){
+function _isWsUpgrade(request) {
   const u = request.headers.get("Upgrade");
   return u && u.toLowerCase() === "websocket";
 }
 
-function _originOk(origin){
-  if(!origin) return true;
-  try{
+function _originOk(origin) {
+  if (!origin) return true;
+  try {
     const o = new URL(origin).origin;
     return ALLOWED_ORIGINS.has(o);
-  }catch(_e){
+  } catch (_e) {
     return false;
   }
 }
 
-function _genRoomCode(n=5){
+function _genRoomCode(n = 5) {
   const r = new Uint8Array(n);
   crypto.getRandomValues(r);
   let out = "";
-  for(let i=0;i<n;i++) out += CODE_CHARS[r[i] % CODE_CHARS.length];
+  for (let i = 0; i < n; i++) out += CODE_CHARS[r[i] % CODE_CHARS.length];
   return out;
 }
 
-function _genClientId(){
+function _genClientId() {
   const r = new Uint8Array(9);
   crypto.getRandomValues(r);
   let s = "";
-  for(let i=0;i<r.length;i++) s += r[i].toString(16).padStart(2, "0");
+  for (let i = 0; i < r.length; i++) s += r[i].toString(16).padStart(2, "0");
   return s;
 }
 
-function _json(ws, obj){ try{ ws.send(JSON.stringify(obj)); }catch(_e){} }
-
-function _safeParseJson(s){ try{ return JSON.parse(s); }catch(_e){ return null; } }
+function _json(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (_e) { } }
 
 export default {
-  async fetch(request, env){
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    if(path === "/" || path === "/health") return new Response("nwr lobby ok", { headers: { "content-type": "text/plain; charset=utf-8" }, });
+    if (path === "/" || path === "/health") return new Response("nwr lobby ok", { headers: { "content-type": "text/plain; charset=utf-8" }, });
 
-    if(path === "/ws"){
-      if(!_isWsUpgrade(request)){
-        return new Response("Expected WebSocket", { status: 400 });
-      }
+    if (path === "/ws") {
+      if (!_isWsUpgrade(request)) return new Response("Expected WebSocket", { status: 400 });
 
       const origin = request.headers.get("Origin");
-      if(!_originOk(origin)){
-        return new Response("Origin not allowed", { status: 403 });
+      if (!_originOk(origin)) return new Response("Origin not allowed", { status: 403 });
+
+      const mode = (url.searchParams.get("mode") || "").toLowerCase(); // host | join
+      const name = (url.searchParams.get("name") || "player").slice(0, 20);
+      let room = (url.searchParams.get("room") || "")
+        .toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+
+      if (mode === "host") {
+        if (!room) room = _genRoomCode(5);
+      } else if (mode === "join") {
+        if (!room) return new Response("room required", { status: 400 });
+      } else {
+        return new Response("mode required (host|join)", { status: 400 });
       }
 
-      const parts = url.pathname.split("/").filter(Boolean); // ["ws", <code?>]
-      let code = "";
-      if(parts.length <= 1){
-        code = _genRoomCode(5);
-      }else{
-        code = String(parts[1] || "").trim().toUpperCase();
-      }
-
-      const id = env.ROOMS.idFromName(code);
+      const id = env.ROOMS.idFromName(`room:${room}`);
       const stub = env.ROOMS.get(id);
 
+      const fwdUrl = new URL(request.url);
+      fwdUrl.searchParams.set("room", room);
+      fwdUrl.searchParams.set("name", name);
+      fwdUrl.searchParams.set("mode", mode);
+
       const headers = new Headers(request.headers);
-      headers.set("X-Room-Code", code);
-      // Forward the same URL; DO doesn't care about the host.
-      const forward = new Request(request.url, {
-        method: request.method,
-        headers,
-      });
-      return stub.fetch(forward);
+      headers.set("X-Room-Code", room);
+
+      return stub.fetch(new Request(fwdUrl.toString(), { method: request.method, headers }));
     }
 
     return new Response("Not found", { status: 404 });
@@ -93,23 +93,27 @@ export default {
 };
 
 export class Room extends DurableObject {
-  constructor(state, env){
+  constructor(state, env) {
+    super(state, env);
     this.state = state;
     this.env = env;
     this.roomCode = "";
 
-    this.clients = new Map(); // ws -> { id, name, ready }
+    this.clients = new Map();
     this.hostId = "";
   }
 
-  async fetch(request){
-    if(!_isWsUpgrade(request)){
+  async fetch(request) {
+    if (!_isWsUpgrade(request)) {
       return new Response("Expected WebSocket", { status: 400 });
     }
 
+    const url = new URL(request.url);
+    const name = (url.searchParams.get("name") || "").slice(0, 20).trim();
+
     // Record room code from Worker
     const room = String(request.headers.get("X-Room-Code") || "").trim().toUpperCase();
-    if(room) this.roomCode = room;
+    if (room) this.roomCode = room;
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -117,21 +121,21 @@ export class Room extends DurableObject {
     server.accept();
 
     // Hard cap: 4 players
-    if(this.clients.size >= 4){
+    if (this.clients.size >= 4) {
       _json(server, { t: "err", message: "Room is full (max 4)" });
-      try{ server.close(1000, "room full"); }catch(_e){}
+      try { server.close(1000, "room full"); } catch (_e) { }
       return new Response(null, { status: 101, webSocket: client });
     }
 
     const id = _genClientId();
     const rec = {
       id,
-      name: `Player-${id.slice(0,4)}`,
+      name: name || `Player-${id.slice(0, 4)}`,
       ready: false,
     };
 
     // First connection becomes host.
-    if(!this.hostId) this.hostId = id;
+    if (!this.hostId) this.hostId = id;
 
     this.clients.set(server, rec);
 
@@ -139,53 +143,56 @@ export class Room extends DurableObject {
     this._broadcastState();
 
     server.addEventListener("message", (ev) => {
-      // ev.data: string | ArrayBuffer なので string に寄せる
       let text = "";
-      if (typeof ev.data === "string") {
-        text = ev.data;
-      } else if (ev.data instanceof ArrayBuffer) {
-        text = new TextDecoder().decode(ev.data);
-      } else {
-        // 念のため（ここに来ることはほぼない）
-        try { text = String(ev.data); } catch { text = ""; }
-      }
-    
+      if (typeof ev.data === "string") text = ev.data;
+      else if (ev.data instanceof ArrayBuffer) text = new TextDecoder().decode(ev.data);
+      else { try { text = String(ev.data); } catch { text = ""; } }
       if (!text) return;
-    
+
       let data;
       try { data = JSON.parse(text); } catch { return; }
-    
-      const me = this.players.get(server);
+
+      const me = this.clients.get(server);
       if (!me) return;
-    
+
+      // ready toggle
       if (data.t === "ready") {
         me.ready = !!data.ready;
-        this.broadcast(this.snapshot(roomCode));
+        this._broadcastState();
         return;
       }
-    
+
+      // start (host only)
       if (data.t === "start") {
         if (me.id !== this.hostId) return;
-    
-        const allReady = [...this.players.values()].every(pp => pp.isHost ? true : !!pp.ready);
+
+        const allReady = [...this.clients.values()].every(p => p.id === this.hostId || !!p.ready);
         if (!allReady) {
-          server.send(JSON.stringify({ t: "err", code: "not_ready" }));
+          _json(server, { t: "err", code: "not_ready" });
           return;
         }
-        this.broadcast({ t: "start" });
+        this._broadcast({ t: "start" });
         return;
       }
-    });  
+
+      // optional: name change
+      if (data.t === "name") {
+        const nm = String(data.name || "").slice(0, 20).trim();
+        if (nm) me.name = nm;
+        this._broadcastState();
+        return;
+      }
+    });
 
     const onClose = () => {
       const me = this.clients.get(server);
       this.clients.delete(server);
 
-      if(me && me.id === this.hostId){
+      if (me && me.id === this.hostId) {
         // Host-centric: if host leaves, room ends.
         this._broadcast({ t: "closed", reason: "host left" });
-        for(const ws of this.clients.keys()){
-          try{ ws.close(1000, "host left"); }catch(_e){}
+        for (const ws of this.clients.keys()) {
+          try { ws.close(1000, "host left"); } catch (_e) { }
         }
         this.clients.clear();
         this.hostId = "";
@@ -204,11 +211,11 @@ export class Room extends DurableObject {
     });
   }
 
-  _broadcast(obj){
-    for(const ws of this.clients.keys()) _json(ws, obj);
+  _broadcast(obj) {
+    for (const ws of this.clients.keys()) _json(ws, obj);
   }
 
-  _broadcastState(){
+  _broadcastState() {
     const members = Array.from(this.clients.values()).map((c) => ({
       id: c.id,
       name: c.name,

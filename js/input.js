@@ -22,6 +22,16 @@ export class Input {
   _bind(){
     window.addEventListener("keydown", (e) => {
       const code = e.code;
+
+      // When the user is typing in an input/textarea (e.g., multiplayer name/room),
+      // ignore key handling so gameplay/title shortcuts don't trigger.
+      const t = e.target;
+      const isTyping = !!(t && (
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.isContentEditable
+      ));
+      if (isTyping && code !== "Escape") return;
       if(!this.keysDown.has(code) && !e.repeat){
         this.keysPressed.add(code);
       }
