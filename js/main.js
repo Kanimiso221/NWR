@@ -67,6 +67,13 @@ if(ui && typeof ui.onMpReady === "function"){
   ui.onMpReady(() => lobby.toggleReady());
 }
 
+if(ui && typeof ui.onMpStart === "function"){
+  ui.onMpStart(() => {
+    // START is host-only and triggers a room-wide start signal
+    if(lobby && lobby.connected && lobby.isHost) lobby.start();
+  });
+}
+
 // Initial server value (from UI/localStorage)
 if(ui && typeof ui.getMpServer === "function") lobby.setServer(ui.getMpServer());
 

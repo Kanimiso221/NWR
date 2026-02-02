@@ -139,6 +139,7 @@ export class UI {
     this._onMpJoin = null;
     this._onMpLeave = null;
     this._onMpReady = null;
+    this._onMpStart = null;
     this._onMpServerChange = null;
     this._onMpNameChange = null;
 
@@ -650,6 +651,7 @@ export class UI {
   onMpJoin(fn) { this._onMpJoin = fn; }
   onMpLeave(fn) { this._onMpLeave = fn; }
   onMpReady(fn) { this._onMpReady = fn; }
+  onMpStart(fn) { this._onMpStart = fn; }
   onMpServerChange(fn) { this._onMpServerChange = fn; }
   onMpNameChange(fn) { this._onMpNameChange = fn; }
 
@@ -705,6 +707,7 @@ export class UI {
     if (this.mpRoomEl) { this.mpRoomEl.disabled = connecting || connected || !serverOk; }
     if (this.mpLeaveBtn) { this.mpLeaveBtn.disabled = !connecting && !connected; }
     if (this.mpReadyBtn) { this.mpReadyBtn.disabled = !connected; }
+    if (this.mpStartBtn) { this.mpStartBtn.disabled = true; }
 
     // Room row
     if (this.mpRoomRowEl) {
@@ -722,6 +725,21 @@ export class UI {
     if (this.mpReadyBtn) {
       this.mpReadyBtn.textContent = ready ? "READY ✓" : "READY";
       this.mpReadyBtn.classList.toggle("on", ready);
+    }
+
+    // Start button (inside MP panel)
+    if (this.mpStartBtn) {
+      if (!connected) {
+        this.mpStartBtn.textContent = "START";
+        this.mpStartBtn.disabled = true;
+      } else if (isHost) {
+        const allReady = members.length ? members.every(m => !!m.ready) : true;
+        this.mpStartBtn.textContent = "START";
+        this.mpStartBtn.disabled = !allReady;
+      } else {
+        this.mpStartBtn.textContent = "WAIT";
+        this.mpStartBtn.disabled = true;
+      }
     }
 
     // Players list
@@ -1003,6 +1021,7 @@ export class UI {
 
           <div class="mpBottom">
             <button id="mpReadyBtn" class="mpBtn" type="button">READY</button>
+            <button id="mpStartBtn" class="mpBtn" type="button">START</button>
             <div id="mpStatus" class="mpStatus"></div>
           </div>
         </div>
@@ -1033,6 +1052,7 @@ export class UI {
     this.mpLeaveBtn = document.getElementById("mpLeaveBtn") || null;
     this.mpPlayersEl = document.getElementById("mpPlayers") || null;
     this.mpReadyBtn = document.getElementById("mpReadyBtn") || null;
+    this.mpStartBtn = document.getElementById("mpStartBtn") || null;
     this.mpStatusEl = document.getElementById("mpStatus") || null;
 
     // Initial values
@@ -1087,6 +1107,12 @@ export class UI {
     });
     this.mpReadyBtn?.addEventListener("click", () => {
       if (this._onMpReady) this._onMpReady();
+    });
+    this.mpStartBtn?.addEventListener("click", () => {
+      // Host-only start (enabled only when everyone is READY)
+      if (this._onMpStart) { this._onMpStart(); return; }
+      // Fallback: reuse the main START button wiring
+      try { this.startBtn?.click(); } catch (_e) { }
     });
     this.mpCopyBtn?.addEventListener("click", async () => {
       const code = String(this._mpView.roomCode || "").trim();

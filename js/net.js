@@ -114,6 +114,15 @@ export class LobbyClient {
     this._send({ t:"start" });
   }
 
+  // No.1: game channel helpers
+  sendInput(input, seq=0){
+    this._send({ t:"g", op:"input", seq: (seq|0), input: input || {} });
+  }
+  sendSnapshot(snap, tick=0){
+    // host-only (server will ignore if not host)
+    this._send({ t:"g", op:"snap", tick: (tick|0), snap: snap || {} });
+  }
+
   // --------------------
 
   _connect({mode, room, name}){
@@ -172,18 +181,25 @@ export class LobbyClient {
       if(msg.t === "welcome"){
         this.selfId = msg.id || "";
         this.roomCode = msg.room || "";
-        this.isHost = !!msg.isHost;
-        this.hostId = msg.hostId || "";
-        this.members = Array.isArray(msg.players) ? msg.players.map(_normMember) : [];
+        // Support both old/new server fields:
+        // - isHost / host
+        // - hostId
+        // - players / members
+        this.isHost = !!(msg.isHost || msg.host);
+        this.hostId = msg.hostId || (this.isHost ? this.selfId : "");
+        const list = msg.players || msg.members || [];
+        this.members = Array.isArray(list) ? list.map(_normMember) : [];
+        if(this.hostId && this.selfId) this.isHost = (this.hostId === this.selfId);
         this._syncReadyFromMembers();
         this._emit();
         return;
       }
 
-      if(msg.t === "room"){
+      if(msg.t === "room" || msg.t === "state"){
         this.roomCode = msg.room || this.roomCode;
         this.hostId = msg.hostId || this.hostId || "";
-        this.members = Array.isArray(msg.players) ? msg.players.map(_normMember) : [];
+        const list = msg.players || msg.members || [];
+        this.members = Array.isArray(list) ? list.map(_normMember) : [];
         this.isHost = (this.hostId && this.selfId) ? (this.hostId === this.selfId) : this.isHost;
         this._syncReadyFromMembers();
         this._emit();
@@ -193,6 +209,19 @@ export class LobbyClient {
       if(msg.t === "start"){
         if(this.onStart) this.onStart();
         return;
+      }
+
+      // Game channel (No.1): input -> host, snapshot -> everyone (relayed by lobby)
+      if(msg.t === "g"){
+        const op = String(msg.op || "");
+        if(op === "input"){
+          if(this.onGameInput) this.onGameInput(msg);
+          return;
+        }
+        if(op === "snap"){
+          if(this.onGameSnapshot) this.onGameSnapshot(msg);
+          return;
+        }
       }
 
       if(msg.t === "close" || msg.t === "closed"){

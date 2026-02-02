@@ -139,7 +139,7 @@ export class Room extends DurableObject {
 
     this.clients.set(server, rec);
 
-    _json(server, { t: "welcome", id, room: this.roomCode, host: id === this.hostId });
+    _json(server, { t: "welcome", id, room: this.roomCode, host: id === this.hostId, isHost: id === this.hostId, hostId: this.hostId, members: this._players(), players: this._players() });
     this._broadcastState();
 
     server.addEventListener("message", (ev) => {
@@ -166,13 +166,34 @@ export class Room extends DurableObject {
       if (data.t === "start") {
         if (me.id !== this.hostId) return;
 
-        const allReady = [...this.clients.values()].every(p => p.id === this.hostId || !!p.ready);
+        const allReady = [...this.clients.values()].every(p => !!p.ready);
         if (!allReady) {
           _json(server, { t: "err", code: "not_ready" });
           return;
         }
         this._broadcast({ t: "start" });
         return;
+      }
+
+      // No.1: game channel relay
+      // - input: clients -> host only
+      // - snap: host -> everyone
+      if (data.t === "g") {
+        const op = String(data.op || "");
+        if (op === "input") {
+          // forward to host
+          const payload = { t: "g", op: "input", from: me.id, seq: (data.seq|0), input: data.input || {} };
+          for (const [ws, rec] of this.clients.entries()) {
+            if (rec && rec.id === this.hostId) _json(ws, payload);
+          }
+          return;
+        }
+        if (op === "snap") {
+          if (me.id !== this.hostId) return;
+          const payload = { t: "g", op: "snap", from: me.id, tick: (data.tick|0), snap: data.snap || data.state || {} };
+          this._broadcast(payload);
+          return;
+        }
       }
 
       // optional: name change
@@ -211,16 +232,25 @@ export class Room extends DurableObject {
     });
   }
 
+  _players(){
+    return Array.from(this.clients.values()).map((c) => ({
+      id: c.id,
+      name: c.name,
+      ready: !!c.ready,
+      host: c.id === this.hostId,
+      isHost: c.id === this.hostId,
+    }));
+  }
+
   _broadcast(obj) {
     for (const ws of this.clients.keys()) _json(ws, obj);
   }
 
   _broadcastState() {
-    const members = Array.from(this.clients.values()).map((c) => ({
-      id: c.id,
-      name: c.name,
-      ready: c.ready,
-    }));
-    this._broadcast({ t: "state", room: this.roomCode, hostId: this.hostId, members });
+    const players = this._players();
+    // New message name for client (net.js): "room"
+    this._broadcast({ t: "room", room: this.roomCode, hostId: this.hostId, players, members: players });
+    // Back-compat alias
+    this._broadcast({ t: "state", room: this.roomCode, hostId: this.hostId, players, members: players });
   }
 }
