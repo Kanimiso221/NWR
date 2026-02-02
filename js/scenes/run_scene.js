@@ -10,11 +10,14 @@ export class RunScene {
   }
 
   update(dt) {
-    const { game, input, ui } = this.engine;
+    const { game, input, ui, lobby, mp } = this.engine;
     if (!game || game.state !== "playing") return;
 
     const res = game.update(dt, input, ui && ui.reducedMotion);
     this._timeScale = (res && res.timeScale != null) ? res.timeScale : 1;
+
+    // Multiplayer tick (No.3): snapshot / presence channel
+    if (mp && typeof mp.update === "function") mp.update(dt, game, lobby);
   }
 
   render() {

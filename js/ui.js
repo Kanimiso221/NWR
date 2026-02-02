@@ -1082,6 +1082,17 @@ export class UI {
         this._mpPersist?.();
         this._mpRender?.();
       });
+      // Prevent Enter from bubbling to TitleScene (which would start a solo run).
+      this.mpNameEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          try { e.stopImmediatePropagation(); } catch (_e) { }
+          try { this.mpRoomEl?.focus(); } catch (_e2) { }
+          // commit name
+          try { this.mpNameEl.dispatchEvent(new Event("change")); } catch (_e3) { }
+        }
+      });
     }
 
     if (this.mpRoomEl) {
@@ -1091,6 +1102,8 @@ export class UI {
       this.mpRoomEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
+          e.stopPropagation();
+          try { e.stopImmediatePropagation(); } catch (_e) { }
           if (this._onMpJoin) this._onMpJoin(this.getMpRoomCode());
         }
       });

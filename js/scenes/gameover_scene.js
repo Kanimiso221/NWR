@@ -11,6 +11,11 @@ export class GameOverScene {
   update(dt) {
     const { input } = this.engine;
 
+    // If typing in an input, don't treat Enter as "Restart".
+    const ae = (typeof document !== "undefined") ? document.activeElement : null;
+    const isTyping = !!(ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT" || ae.isContentEditable));
+    if (isTyping) return;
+
     // Enter restarts
     if (input && input.consumePressed("Enter")) {
       if (typeof this.engine.restartRun === "function") this.engine.restartRun();
