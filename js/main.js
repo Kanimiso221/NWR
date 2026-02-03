@@ -42,6 +42,7 @@ const mp = {
   sendSeq: 0,
   snapTick: 0,
   lastSnapTick: -1,
+  lastSnapTime: -1,
 
   // host: latest input for each client
   lastClientInput: new Map(), // id -> netInput
@@ -65,6 +66,7 @@ const mp = {
     this.sendSeq = 0;
     this.snapTick = 0;
     this.lastSnapTick = -1;
+    this.lastSnapTime = -1;
     this.lastClientInput.clear();
     this.simPlayers.clear();
     this.remotePlayers.clear();
@@ -157,7 +159,10 @@ const mp = {
         if(sp) players.push(Object.assign({ id }, _packNetPlayer(sp)));
       }
 
-      lobby.sendSnapshot({ runId: this.runId, time: game.time, room: game.room, players }, this.snapTick++);
+      const snap = { runId: this.runId, time: game.time, room: game.room, players };
+      // Host should see client movement even if the relay doesn't echo snapshots back.
+      _applyPartySnapshot(snap);
+      lobby.sendSnapshot(snap, this.snapTick++);
     }
   }
 };
@@ -292,7 +297,7 @@ function _applyPartySnapshot(snap){
   if(!snap || typeof snap !== "object") return;
   const runId = (snap.runId|0) || 0;
   // If host restarted, wipe remote cache so old ghosts don't linger.
-  if(runId !== (mp.runId|0)) mp.resetForRun(runId);
+  if(runId && runId !== (mp.runId|0)) mp.resetForRun(runId);
 
   const players = Array.isArray(snap.players) ? snap.players : [];
   const selfId = _resolveMyId(lobby);
@@ -386,26 +391,56 @@ lobby.onGameInput = (msg) => {
 lobby.onGameSnapshot = (msg) => {
   const snap = (msg && (msg.snap || msg.state)) || null;
   const runId = (snap && (snap.runId|0)) || 0;
+  const tick = (msg && msg.tick != null) ? (msg.tick|0) : -1;
+  const stime = (snap && snap.time != null) ? Number(snap.time) : null;
 
-  // IMPORTANT: host restarts reset tick to 0. We must detect run changes BEFORE
-  // applying the monotonic tick gate, or clients can ignore every snapshot forever.
+  // Detect run changes even if a client missed the start message.
+  // Preferred signal: runId changed.
   if(runId && runId !== (mp.runId|0)){
     mp.resetForRun(runId);
+  }else{
+    // Fallback: detect tick/time going backwards (restart).
+    let epochReset = false;
+    const prevTick = (mp.lastSnapTick|0);
+    if(tick >= 0 && prevTick >= 0 && tick < prevTick){
+      if(tick === 0 || (prevTick - tick) > 5) epochReset = true;
+    }
+    const prevTime = (typeof mp.lastSnapTime === "number") ? mp.lastSnapTime : -1;
+    if(!epochReset && stime != null && Number.isFinite(stime) && prevTime >= 0 && stime < (prevTime - 0.25)){
+      epochReset = true;
+    }
+    if(epochReset){
+      // Partial reset: keep runId, but clear monotonic gates and ghosts.
+      mp.lastSnapTick = -1;
+      mp.lastSnapTime = -1;
+      mp.selfAuth = null;
+      mp.remotePlayers.clear();
+    }
   }
 
-  const tick = (msg && msg.tick != null) ? (msg.tick|0) : -1;
-  if(tick >= 0 && tick <= (mp.lastSnapTick|0)) return;
-  mp.lastSnapTick = tick;
+  // Monotonic tick gate (only if relay provides tick).
+  if(tick >= 0){
+    const last = (mp.lastSnapTick|0);
+    if(last >= 0 && tick <= last) return;
+    mp.lastSnapTick = tick;
+  }
+  if(stime != null && Number.isFinite(stime)){
+    mp.lastSnapTime = stime;
+  }
 
   _applyPartySnapshot(snap);
 
   // Self-heal: if a client missed the start message, snapshots can still pull them into the run.
-  if(lobby && lobby.connected && !lobby.isHost && engineRef && game && game.state !== "playing" && runId){
-    const cfg = (mp.lastStartCfg && ((mp.lastStartCfgRunId|0) === runId)) ? mp.lastStartCfg : { seed: _newSeed32(), focusModeId: _getSelectedFocusMode(), room: 1 };
-    if(typeof engineRef.startRun === "function") engineRef.startRun(cfg);
-    if(scenes && typeof scenes.set === "function") scenes.set("run", null, { instant: true });
+  if(lobby && lobby.connected && !lobby.isHost && engineRef && game && game.state !== "playing"){
+    const hasPlayers = !!(snap && Array.isArray(snap.players) && snap.players.length);
+    if(hasPlayers){
+      const cfg = (mp.lastStartCfg && ((mp.lastStartCfgRunId|0) === (runId|0))) ? mp.lastStartCfg : { seed: _newSeed32(), focusModeId: _getSelectedFocusMode(), room: 1 };
+      if(typeof engineRef.startRun === "function") engineRef.startRun(cfg);
+      if(scenes && typeof scenes.set === "function") scenes.set("run", null, { instant: true });
+    }
   }
 };
+
 // Wire UI -> lobby
 if(ui && typeof ui.onMpServerChange === "function"){
   ui.onMpServerChange((url) => lobby.setServer(url));
