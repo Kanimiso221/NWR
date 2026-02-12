@@ -239,19 +239,54 @@ function _coerceNetInput(s){
 }
 
 function _makeFakeInput(ni){
-  const s = ni || { mvx: 0, mvy: 0, aimX: 0, aimY: 0, dash: false, shoot: false };
+  // Player.update expects an Input-like object:
+  // - getMoveVector()
+  // - isDown()
+  // - consumePressed()
+  // - mouse {x,y,down,pressed}
+  const s = ni || { mvx: 0, mvy: 0, aimX: 0, aimY: 0, dash: false, focus: false, shoot: false };
+
+  let dashOnce = !!s.dash;
+
   return {
-    move: { x: _num(s.mvx, 0), y: _num(s.mvy, 0) },
-    mouseWorld: { x: _num(s.aimX, 0), y: _num(s.aimY, 0) },
-    mouseDown: !!s.shoot,
-    _dashOnce: !!s.dash,
+    locked: false,
+
+    getMoveVector(){
+      // match Input.getMoveVector() shape: {x,y} in [-1..1]
+      const x = Math.max(-1, Math.min(1, _num(s.mvx, 0)));
+      const y = Math.max(-1, Math.min(1, _num(s.mvy, 0)));
+      return { x, y };
+    },
+
+    isDown(code){
+      // Only what we need for remote sim right now
+      if(code === "Space" || code === "Spacebar") return !!s.focus;
+      return false;
+    },
+
     consumePressed(code){
+      // dash is a one-shot press (Shift)
       if(code === "ShiftLeft" || code === "ShiftRight"){
-        if(this._dashOnce){
-          this._dashOnce = false;
+        if(dashOnce){
+          dashOnce = false;
           return true;
         }
       }
+      return false;
+    },
+
+    // Keep a mouse object so any aim/face code won't explode.
+    mouse: {
+      x: 0,
+      y: 0,
+      down: false,     // IMPORTANT: don't let remote sim fire bullets locally (No.5 will sync bullets)
+      pressed: false,
+    },
+
+    // Optional helpers some code paths might reference
+    peekPressed(code){
+      // treat dash as pressed once
+      if(code === "ShiftLeft" || code === "ShiftRight") return dashOnce;
       return false;
     }
   };
