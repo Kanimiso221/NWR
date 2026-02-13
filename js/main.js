@@ -61,6 +61,10 @@ const mp = {
   _sendAcc: 0,
   _snapAcc: 0,
 
+  // Some flows can momentarily clear LobbyClient.members (e.g., during scene transitions).
+  // Keep a cache so we can still prune ghosts and simulate clients reliably.
+  _membersCache: [],
+
   resetForRun(runId){
     this.runId = (runId|0) || 0;
     this.sendSeq = 0;
@@ -100,8 +104,11 @@ const mp = {
     if(!lobby.isHost) return;
 
     // Host: simulate remote players every frame (movement only).
-    const me = _resolveMyId(lobby);
-    const members = Array.isArray(lobby.members) ? lobby.members : [];
+    // Prefer selfId; fall back to hostId only for host snapshot identity.
+    const me = String((lobby && lobby.selfId) || (lobby && lobby.hostId) || "");
+    const members = (lobby && Array.isArray(lobby.members) && lobby.members.length)
+      ? lobby.members
+      : (this._membersCache || []);
 
     let idx = 0;
     for(const m of members){
@@ -173,13 +180,9 @@ function _num(v, fallback=0){
 }
 
 function _resolveMyId(lobby){
+  // Only return the *local* id. Do not guess (guessing can hide other players).
   const sid = String((lobby && lobby.selfId) || "");
-  if(sid) return sid;
-  const hid = String((lobby && lobby.hostId) || "");
-  if(lobby && lobby.isHost && hid) return hid;
-  const members = (lobby && Array.isArray(lobby.members)) ? lobby.members : [];
-  const hm = members.find(m => m && (m.host || m.isHost));
-  return hm ? String(hm.id || "") : "";
+  return sid;
 }
 
 function _packNetPlayer(p){
@@ -384,15 +387,28 @@ function _applyPartySnapshot(snap){
   }
 
   // Remove stale ghosts (left room)
-  const members = (lobby && Array.isArray(lobby.members)) ? lobby.members : [];
-  const memberIds = new Set(members.map(m => String(m.id || "")).filter(Boolean));
-  for(const [id] of mp.remotePlayers){
-    if(!memberIds.has(id)) mp.remotePlayers.delete(id);
+  // Prefer live LobbyClient.members, but fall back to cached members when a transition clears it.
+  const members = (lobby && Array.isArray(lobby.members) && lobby.members.length)
+    ? lobby.members
+    : (mp._membersCache || []);
+
+  const memberIds = new Set(members.map(m => String((m && m.id) || "")).filter(Boolean));
+
+  if(memberIds.size){
+    for(const [id] of mp.remotePlayers){
+      if(!memberIds.has(id)) mp.remotePlayers.delete(id);
+    }
+  }else if(seen.size){
+    // If we couldn't read member state, at least prune by what's in the latest snapshot.
+    for(const [id] of mp.remotePlayers){
+      if(!seen.has(id)) mp.remotePlayers.delete(id);
+    }
   }
 }
 
 // Wire lobby -> UI
 lobby.onState = (view) => {
+  if(view && Array.isArray(view.members)) mp._membersCache = view.members;
   if(ui && typeof ui.setMultiplayerState === "function") ui.setMultiplayerState(view);
 };
 lobby.onClosed = (reason) => {
