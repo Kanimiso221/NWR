@@ -46,6 +46,8 @@ const mp = {
 
   // host: latest input for each client
   lastClientInput: new Map(), // id -> netInput
+  lastClientSeq: new Map(), // id -> latest input seq
+  lastDashSeqUsed: new Map(), // id -> seq already consumed as dash edge
   // host: simulated players (movement only)
   simPlayers: new Map(), // id -> Player
   // render-only remote avatars on this machine (everyone)
@@ -72,6 +74,8 @@ const mp = {
     this.lastSnapTick = -1;
     this.lastSnapTime = -1;
     this.lastClientInput.clear();
+    this.lastClientSeq.clear();
+    this.lastDashSeqUsed.clear();
     this.simPlayers.clear();
     this.remotePlayers.clear();
     this.selfAuth = null;
@@ -136,7 +140,17 @@ const mp = {
       p.focusActive = !!fa;
       p.focusModeId = (ni && ni.fm) ? ni.fm : (p.focusModeId || "chrono");
 
-      const fakeInput = _makeFakeInput(ni);
+      let dashEdge = false;
+      if(ni && ni.dash){
+        const seq = (ni.seq|0);
+        const used = this.lastDashSeqUsed.get(id);
+        if(used !== seq){
+          dashEdge = true;
+          this.lastDashSeqUsed.set(id, seq);
+        }
+      }
+
+      const fakeInput = _makeFakeInput(ni, { dashEdge });
       p.update(dt, fakeInput, game.world);
       if(typeof game._applyObstacleCollisions === "function") game._applyObstacleCollisions(p);
     }
@@ -148,6 +162,12 @@ const mp = {
     }
     for(const [id] of this.lastClientInput){
       if(!memberIds.has(id)) this.lastClientInput.delete(id);
+    }
+    for(const [id] of this.lastClientSeq){
+      if(!memberIds.has(id)) this.lastClientSeq.delete(id);
+    }
+    for(const [id] of this.lastDashSeqUsed){
+      if(!memberIds.has(id)) this.lastDashSeqUsed.delete(id);
     }
 
     // Host: broadcast snapshot at a steady cadence.
@@ -241,29 +261,41 @@ function _coerceNetInput(s){
   };
 }
 
-function _makeFakeInput(ni){
+function _makeFakeInput(ni, opts={}){
   // Player.update expects an Input-like object:
   // - getMoveVector()
+  // - input.move
+  // - input.mouseWorld
   // - isDown()
   // - consumePressed()
   // - mouse {x,y,down,pressed}
   const s = ni || { mvx: 0, mvy: 0, aimX: 0, aimY: 0, dash: false, focus: false, shoot: false };
+  const move = {
+    x: Math.max(-1, Math.min(1, _num(s.mvx, 0))),
+    y: Math.max(-1, Math.min(1, _num(s.mvy, 0))),
+  };
+  const mouseWorld = {
+    x: _num(s.aimX, 0),
+    y: _num(s.aimY, 0),
+  };
 
-  let dashOnce = !!s.dash;
+  // dash is an edge, not a held state. Without this gate the host can replay the
+  // same received input packet across several frames and make a remote player dash repeatedly.
+  let dashOnce = !!(opts && opts.dashEdge);
 
   return {
     locked: false,
+    move,
+    mouseWorld,
+    mouseDown: false,
 
     getMoveVector(){
-      // match Input.getMoveVector() shape: {x,y} in [-1..1]
-      const x = Math.max(-1, Math.min(1, _num(s.mvx, 0)));
-      const y = Math.max(-1, Math.min(1, _num(s.mvy, 0)));
-      return { x, y };
+      return move;
     },
 
     isDown(code){
       // Only what we need for remote sim right now
-      if(code === "Space" || code === "Spacebar") return !!s.focus;
+      if(code === "Space" || code === "Spacebar" || code === " ") return !!s.focus;
       return false;
     },
 
@@ -279,16 +311,17 @@ function _makeFakeInput(ni){
     },
 
     // Keep a mouse object so any aim/face code won't explode.
+    // We intentionally keep down=false so remote sim does not fire local bullets;
+    // projectile authority belongs in the later bullet-sync step.
     mouse: {
       x: 0,
       y: 0,
-      down: false,     // IMPORTANT: don't let remote sim fire bullets locally (No.5 will sync bullets)
+      down: false,
       pressed: false,
     },
 
     // Optional helpers some code paths might reference
     peekPressed(code){
-      // treat dash as pressed once
       if(code === "ShiftLeft" || code === "ShiftRight") return dashOnce;
       return false;
     }
@@ -436,6 +469,9 @@ lobby.onGameInput = (msg) => {
   if(!from) return;
   const ni = _coerceNetInput(msg && msg.input);
   if(!ni) return;
+  const seq = (msg && msg.seq != null) ? (msg.seq|0) : ((mp.lastClientSeq.get(from) || 0) + 1);
+  ni.seq = seq;
+  mp.lastClientSeq.set(from, seq);
   mp.lastClientInput.set(from, ni);
 };
 

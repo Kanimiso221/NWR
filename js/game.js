@@ -327,6 +327,15 @@ export class Game {
     };
   }
 
+  _rr(a = 1, b = 0) {
+    // Deterministic room RNG. Mirrors math.rand(a,b), but uses this run's seeded RNG.
+    return b + this._rng() * (a - b);
+  }
+
+  _chance(p) {
+    return this._rng() < p;
+  }
+
   _isBossRoom(room) {
     return room % 5 === 0;
   }
@@ -388,8 +397,8 @@ export class Game {
       baseH = stage.fixedRoom.h;
     } else {
       // vary room size so it actually feels like "rooms"
-      baseW = boss ? rand(2600, 2200) : rand(2400, 1700);
-      baseH = boss ? rand(2400, 2000) : rand(2300, 1600);
+      baseW = boss ? this._rr(2600, 2200) : this._rr(2400, 1700);
+      baseH = boss ? this._rr(2400, 2000) : this._rr(2300, 1600);
     }
 
     this.world = {
@@ -450,8 +459,8 @@ export class Game {
 
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < tries; i++) {
-        const x = rand(this.world.maxX - pad, this.world.minX + pad);
-        const y = rand(this.world.maxY - pad, this.world.minY + pad);
+        const x = this._rr(this.world.maxX - pad, this.world.minX + pad);
+        const y = this._rr(this.world.maxY - pad, this.world.minY + pad);
 
         if (!accept(x, y, pass)) continue;
 
@@ -487,12 +496,12 @@ export class Game {
     const count = boss ? 12 : (10 + Math.floor(roomNumber * 0.25));
 
     for (let i = 0; i < count; i++) {
-      const useRect = (Math.random() < (boss ? 0.32 : 0.24)) && i > 1;
+      const useRect = this._chance(boss ? 0.32 : 0.24) && i > 1;
 
       if (useRect) {
-        const thin = rand(78, 46);
-        const long = rand(640, 280);
-        const horiz = Math.random() < 0.5;
+        const thin = this._rr(78, 46);
+        const long = this._rr(640, 280);
+        const horiz = this._chance(0.5);
 
         const ww = horiz ? long : thin;
         const hh = horiz ? thin : long;
@@ -502,25 +511,25 @@ export class Game {
 
         let x = 0, y = 0;
         for (let k = 0; k < 320; k++) {
-          x = rand(this.world.maxX - (hw + 130), this.world.minX + (hw + 130));
-          y = rand(this.world.maxY - (hh2 + 130), this.world.minY + (hh2 + 130));
+          x = this._rr(this.world.maxX - (hw + 130), this.world.minX + (hw + 130));
+          y = this._rr(this.world.maxY - (hh2 + 130), this.world.minY + (hh2 + 130));
           if (Math.hypot(x, y) > 240 && insideSafeSpawn(x, y, obs, 0, 0, 280)) {
             break;
           }
         }
-        const mat = mats[(Math.floor(Math.random() * mats.length)) % mats.length];
+        const mat = mats[(Math.floor(this._rng() * mats.length)) % mats.length];
         obs.push(new Obstacle(x, y, ww, hh, { blocksBullets: true, solid: true, material: mat }));
       } else {
-        const r = rand(68, 28);
+        const r = this._rr(68, 28);
         let x = 0, y = 0;
         for (let k = 0; k < 260; k++) {
-          x = rand(this.world.maxX - 120, this.world.minX + 120);
-          y = rand(this.world.maxY - 120, this.world.minY + 120);
+          x = this._rr(this.world.maxX - 120, this.world.minX + 120);
+          y = this._rr(this.world.maxY - 120, this.world.minY + 120);
           if (Math.hypot(x, y) > 220 && insideSafeSpawn(x, y, obs, 0, 0, 260)) {
             break;
           }
         }
-        const blocksBullets = Math.random() < circleBlockChance;
+        const blocksBullets = this._chance(circleBlockChance);
         const mat = blocksBullets ? (mats[0] || "metal") : (mats[1] || "glass");
         obs.push(new Obstacle(x, y, r, { blocksBullets, solid: true, material: mat }));
       }
