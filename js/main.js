@@ -1,6 +1,7 @@
 import { Input } from "./input.js";
 import { Game } from "./game.js";
-import { Player } from "./entities.js";
+import { Player, Bullet } from "./entities.js";
+import { getFocusMode } from "./focus_modes.js";
 import { UI } from "./ui.js";
 import { Sfx } from "./audio.js";
 import { Bgm } from "./bgm.js";
@@ -36,7 +37,7 @@ const lobby = new LobbyClient();
 // - Clients send INPUT (move/aim/dash/focus) to the host.
 // - Host simulates movement for everyone and broadcasts a snapshot.
 // - Clients use the snapshot to render others, and (for now) hard-correct their own position.
-// NOTE: Bullets/enemies are still local-sim; next steps (No.5+) will sync bullets + damage.
+// NOTE: Player/enemy bullets are now host-broadcast. Enemy AI/damage/room flow are still local-sim until No.6+.
 const mp = {
   runId: 0,
   sendSeq: 0,
@@ -85,6 +86,7 @@ const mp = {
 
   // Called from RunScene.update() BEFORE game.update
   preUpdate(dt, game, lobby, input){
+    if(game) game.netBulletAuthority = !!(lobby && lobby.connected && !lobby.isHost);
     if(!lobby || !lobby.connected || !game || game.state !== "playing") return;
 
     // Client: apply authoritative correction before local sim so camera doesn't drift.
@@ -137,8 +139,8 @@ const mp = {
       // Approx: treat Space/FA as "focus active" for visuals.
       // Prefer the client's computed focus-active flag if present.
       const fa = (ni && (ni.fa === true || ni.fa === false)) ? ni.fa : !!(ni && ni.focus);
-      p.focusActive = !!fa;
-      p.focusModeId = (ni && ni.fm) ? ni.fm : (p.focusModeId || "chrono");
+      const fm = (ni && ni.fm) ? ni.fm : (p.focusModeId || "chrono");
+      _applyRemoteFocusMode(p, fm, fa);
 
       let dashEdge = false;
       if(ni && ni.dash){
@@ -153,6 +155,21 @@ const mp = {
       const fakeInput = _makeFakeInput(ni, { dashEdge });
       p.update(dt, fakeInput, game.world);
       if(typeof game._applyObstacleCollisions === "function") game._applyObstacleCollisions(p);
+
+      // Host-authoritative player bullets: generate remote players' shots on the host,
+      // then include them in the next snapshot. Damage authority still moves to No.6.
+      if(ni && ni.shoot && typeof p.tryShoot === "function"){
+        const shots = p.tryShoot(dt, fakeInput, !!p.focusActive);
+        if(shots){
+          const arr = Array.isArray(shots) ? shots : [shots];
+          const cap = (game._bulletCap || 900);
+          for(const sh of arr){
+            if(game.bullets.length >= cap) break;
+            const meta = Object.assign({}, sh.meta || {}, { ownerId: id, focusModeId: p.focusModeId });
+            game.bullets.push(new Bullet(sh.x, sh.y, sh.vx, sh.vy, "player", meta));
+          }
+        }
+      }
     }
 
     // prune sims for leavers
@@ -186,7 +203,14 @@ const mp = {
         if(sp) players.push(Object.assign({ id }, _packNetPlayer(sp)));
       }
 
-      const snap = { runId: this.runId, time: game.time, room: game.room, players };
+      const snap = {
+        runId: this.runId,
+        seed: (game.seed >>> 0) || 1,
+        time: game.time,
+        room: game.room,
+        players,
+        bullets: _packNetBullets(game.bullets),
+      };
       // Host should see client movement even if the relay doesn't echo snapshots back.
       _applyPartySnapshot(snap);
       lobby.sendSnapshot(snap, this.snapTick++);
@@ -223,6 +247,99 @@ function _packNetPlayer(p){
     stageFxType: String(p.stageFxType || "none").slice(0, 16),
     stageFxA: _num(p.stageFxA, 0),
   };
+}
+
+function _packNetBullet(b){
+  if(!b) return null;
+  return {
+    x: _num(b.x, 0),
+    y: _num(b.y, 0),
+    vx: _num(b.vx, 0),
+    vy: _num(b.vy, 0),
+    team: String(b.team || "enemy").slice(0, 12),
+    r: _num(b.r, 3.2),
+    life: _num(b.life, 1),
+    age: _num(b.age, 0),
+    damage: _num(b.damage, 0),
+    pierce: _num(b.pierce, 0),
+    crit: !!b.crit,
+    explodeR: _num(b.explodeR, 0),
+    explodeFalloff: _num(b.explodeFalloff, 0.75),
+  };
+}
+
+function _packNetBullets(list, max=380){
+  if(!Array.isArray(list) || !list.length) return [];
+  const start = Math.max(0, list.length - max);
+  const out = [];
+  for(let i=start; i<list.length; i++){
+    const b = _packNetBullet(list[i]);
+    if(b) out.push(b);
+  }
+  return out;
+}
+
+function _coerceNetBullet(s){
+  if(!s || typeof s !== "object") return null;
+  const team = String(s.team || "enemy").slice(0, 12);
+  if(team !== "player" && team !== "enemy") return null;
+  return {
+    x: _num(s.x, 0),
+    y: _num(s.y, 0),
+    vx: _num(s.vx, 0),
+    vy: _num(s.vy, 0),
+    team,
+    r: Math.max(1, Math.min(24, _num(s.r, team === "player" ? 3.2 : 4.2))),
+    life: Math.max(0.05, Math.min(8, _num(s.life, team === "player" ? 0.95 : 1.25))),
+    age: Math.max(0, Math.min(8, _num(s.age, 0))),
+    damage: _num(s.damage, team === "player" ? 18 : 12),
+    pierce: _num(s.pierce, 0),
+    crit: !!s.crit,
+    explodeR: Math.max(0, Math.min(480, _num(s.explodeR, 0))),
+    explodeFalloff: Math.max(0, Math.min(1, _num(s.explodeFalloff, 0.75))),
+  };
+}
+
+function _makeBulletFromState(st){
+  const b = new Bullet(st.x, st.y, st.vx, st.vy, st.team, {
+    r: st.r,
+    life: st.life,
+    damage: st.damage,
+    pierce: st.pierce,
+    crit: st.crit,
+    explodeR: st.explodeR,
+    explodeFalloff: st.explodeFalloff,
+  });
+  b.age = st.age;
+  return b;
+}
+
+function _applyBulletSnapshot(game, bullets){
+  if(!game || !Array.isArray(bullets)) return;
+  const out = [];
+  const max = 420;
+  for(let i=0; i<bullets.length && out.length<max; i++){
+    const st = _coerceNetBullet(bullets[i]);
+    if(st) out.push(_makeBulletFromState(st));
+  }
+  game.bullets = out;
+}
+
+function _applyRemoteFocusMode(p, focusModeId, focusActive){
+  if(!p) return;
+  const fm = getFocusMode(focusModeId || p.focusModeId || "chrono");
+  const active = !!focusActive;
+  p.focusModeId = fm.id || String(focusModeId || "chrono");
+  p.focusActive = active;
+  p.focusMoveMul = active ? (fm.moveMul ?? 1) : 1;
+  p.focusFireMul = active ? (fm.fireMul ?? 1) : 1;
+  p.focusBulletSpeedMul = active ? (fm.bulletSpeedMul ?? 1) : 1;
+  p.focusBulletLifeMul = active ? (fm.bulletLifeMul ?? 1) : 1;
+  p.focusModeDmgMul = active ? (fm.dmgMul ?? 1) : 1;
+  p.focusModeCritAdd = active ? (fm.critAdd ?? 0) : 0;
+  p.focusModeSpreadMul = active ? (fm.spreadMul ?? 1) : 1;
+  p.focusModePierceAdd = active ? (fm.pierceAdd ?? 0) : 0;
+  p.focusModeDmgTakenMul = active ? (fm.dmgTakenMul ?? 1) : 1;
 }
 
 function _packNetInput(game, input){
@@ -283,11 +400,13 @@ function _makeFakeInput(ni, opts={}){
   // same received input packet across several frames and make a remote player dash repeatedly.
   let dashOnce = !!(opts && opts.dashEdge);
 
+  const shootHeld = !!s.shoot;
+
   return {
     locked: false,
     move,
     mouseWorld,
-    mouseDown: false,
+    mouseDown: shootHeld,
 
     getMoveVector(){
       return move;
@@ -310,14 +429,12 @@ function _makeFakeInput(ni, opts={}){
       return false;
     },
 
-    // Keep a mouse object so any aim/face code won't explode.
-    // We intentionally keep down=false so remote sim does not fire local bullets;
-    // projectile authority belongs in the later bullet-sync step.
+    // Keep a mouse object so aim/fire code can run on the host for remote players.
     mouse: {
       x: 0,
       y: 0,
-      down: false,
-      pressed: false,
+      down: shootHeld,
+      pressed: shootHeld,
     },
 
     // Optional helpers some code paths might reference
@@ -446,6 +563,7 @@ lobby.onState = (view) => {
 };
 lobby.onClosed = (reason) => {
   mp.resetForRun(0);
+  if(game) game.netBulletAuthority = false;
   if(ui && typeof ui.setMultiplayerState === "function") ui.setMultiplayerState({ error: String(reason || "") });
 };
 lobby.onStart = (cfg, runId=0) => {
@@ -516,12 +634,16 @@ lobby.onGameSnapshot = (msg) => {
   }
 
   _applyPartySnapshot(snap);
+  if(lobby && lobby.connected && !lobby.isHost && game && snap && Array.isArray(snap.bullets)){
+    _applyBulletSnapshot(game, snap.bullets);
+  }
 
   // Self-heal: if a client missed the start message, snapshots can still pull them into the run.
   if(lobby && lobby.connected && !lobby.isHost && engineRef && game && game.state !== "playing"){
     const hasPlayers = !!(snap && Array.isArray(snap.players) && snap.players.length);
     if(hasPlayers){
-      const cfg = (mp.lastStartCfg && ((mp.lastStartCfgRunId|0) === (runId|0))) ? mp.lastStartCfg : { seed: _newSeed32(), focusModeId: _getSelectedFocusMode(), room: 1 };
+      const snapSeed = (snap && typeof snap.seed === "number") ? (snap.seed >>> 0) : 0;
+      const cfg = (mp.lastStartCfg && ((mp.lastStartCfgRunId|0) === (runId|0))) ? mp.lastStartCfg : { seed: snapSeed || _newSeed32(), room: 1 };
       if(typeof engineRef.startRun === "function") engineRef.startRun(cfg);
       if(scenes && typeof scenes.set === "function") scenes.set("run", null, { instant: true });
     }
@@ -547,7 +669,10 @@ if(ui && typeof ui.onMpJoin === "function"){
   });
 }
 if(ui && typeof ui.onMpLeave === "function"){
-  ui.onMpLeave(() => lobby.leave("leave"));
+  ui.onMpLeave(() => {
+    if(game) game.netBulletAuthority = false;
+    lobby.leave("leave");
+  });
 }
 if(ui && typeof ui.onMpReady === "function"){
   ui.onMpReady(() => lobby.toggleReady());
@@ -559,8 +684,7 @@ if(ui && typeof ui.onMpStart === "function"){
     if(!(lobby && lobby.connected && lobby.isHost)) return;
 
     const seed = _newSeed32();
-    const focusModeId = _getSelectedFocusMode();
-    lobby.startWithConfig({ seed, focusModeId, room: 1 });
+    lobby.startWithConfig({ seed, room: 1 });
   });
 }
 
@@ -733,8 +857,7 @@ ui.onStart(() => {
   if(lobby && lobby.connected){
     if(lobby.isHost){
       const seed = _newSeed32();
-      const focusModeId = _getSelectedFocusMode();
-      lobby.startWithConfig({ seed, focusModeId, room: 1 });
+      lobby.startWithConfig({ seed, room: 1 });
     }
     return;
   }
@@ -747,8 +870,7 @@ ui.onRestart(() => {
     lobby.setReady(true);
     if(lobby.isHost){
       const seed = _newSeed32();
-      const focusModeId = _getSelectedFocusMode();
-      lobby.startWithConfig({ seed, focusModeId, room: 1 });
+      lobby.startWithConfig({ seed, room: 1 });
     }
     return;
   }
@@ -847,15 +969,23 @@ engine.startRun = (startCfg=null) => {
   unlockAudioOnce();
   let cfg = (startCfg && typeof startCfg === "object") ? startCfg : null;
   let focusModeId = _getSelectedFocusMode();
-  if (cfg && cfg.focusModeId) focusModeId = String(cfg.focusModeId);
-  // Keep UI selection in sync with host-chosen mode.
+
+  // Multiplayer start configs are room-wide. They must share seed/room only;
+  // each player keeps their own title-screen FOCUS selection.
+  const mpRoomStart = !!(lobby && lobby.connected);
+  if (cfg && cfg.selfFocusModeId) focusModeId = String(cfg.selfFocusModeId);
+  else if (cfg && cfg.focusModeId && !mpRoomStart) focusModeId = String(cfg.focusModeId);
+
+  // Keep UI selection in sync only when a config is truly meant for this local player.
   try{
-    if (ui && cfg && cfg.focusModeId && typeof ui.setSelectedFocusModeId === "function") {
-      ui.setSelectedFocusModeId(String(cfg.focusModeId), false);
+    const syncFocus = (cfg && cfg.selfFocusModeId) ? cfg.selfFocusModeId : ((cfg && cfg.focusModeId && !mpRoomStart) ? cfg.focusModeId : null);
+    if (ui && syncFocus && typeof ui.setSelectedFocusModeId === "function") {
+      ui.setSelectedFocusModeId(String(syncFocus), false);
     }
   }catch(_e){}
 
   if (ui) ui.hide();
+  if(game) game.netBulletAuthority = !!(lobby && lobby.connected && !lobby.isHost);
   // Game.start accepts either focusModeId (string) or a start config object.
   if (cfg) {
     cfg = Object.assign({}, cfg, { focusModeId });
@@ -881,8 +1011,7 @@ engine.restartRun = () => {
     lobby.setReady(true);
     if(lobby.isHost){
       const seed = _newSeed32();
-      const focusModeId = _getSelectedFocusMode();
-      lobby.startWithConfig({ seed, focusModeId, room: 1 });
+      lobby.startWithConfig({ seed, room: 1 });
     }
     return;
   }

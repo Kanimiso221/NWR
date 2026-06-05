@@ -214,6 +214,9 @@ export class Game {
 
     // perf: cap total bullets to keep bullet-hell moments stable
     this._bulletCap = 900;
+
+    // Multiplayer client mode: bullets come from the host snapshot, not local shooting.
+    this.netBulletAuthority = false;
     this.room = 1;
     this.killsThisRoom = 0;
     this.killsTarget = 10;
@@ -1216,26 +1219,30 @@ export class Game {
     this._updateBlades(dtWorld);
 
     // shooting
-    const shots = this.player.tryShoot(dtPlayer, input, focusActive);
-    if (shots) {
-      const arr = Array.isArray(shots) ? shots : [shots];
+    // In multiplayer client mode, projectile authority belongs to the host.
+    // The client still sends shoot/aim input, then receives bullets back via snapshots.
+    if (!this.netBulletAuthority) {
+      const shots = this.player.tryShoot(dtPlayer, input, focusActive);
+      if (shots) {
+        const arr = Array.isArray(shots) ? shots : [shots];
 
-      // cap bullets to prevent runaway slowdowns
-      const cap = this._bulletCap || 900;
-      let made = 0;
+        // cap bullets to prevent runaway slowdowns
+        const cap = this._bulletCap || 900;
+        let made = 0;
 
-      for (const s of arr) {
-        if (this.bullets.length >= cap) break;
-        this.bullets.push(new Bullet(s.x, s.y, s.vx, s.vy, "player", s.meta));
-        made++;
-      }
+        for (const s of arr) {
+          if (this.bullets.length >= cap) break;
+          this.bullets.push(new Bullet(s.x, s.y, s.vx, s.vy, "player", s.meta));
+          made++;
+        }
 
-      if (made > 0) {
-        this.sfx.shoot();
-        if (!reducedMotion) this._shake(1.4);
-        // one burst per trigger (not per pellet) for performance
-        const s0 = arr[0];
-        this.particles.burst({ x: s0.x, y: s0.y }, 8, { speedMin: 110, speedMax: 360, lifeMin: 0.08, lifeMax: 0.22, glow: 14 });
+        if (made > 0) {
+          this.sfx.shoot();
+          if (!reducedMotion) this._shake(1.4);
+          // one burst per trigger (not per pellet) for performance
+          const s0 = arr[0];
+          this.particles.burst({ x: s0.x, y: s0.y }, 8, { speedMin: 110, speedMax: 360, lifeMin: 0.08, lifeMax: 0.22, glow: 14 });
+        }
       }
     }
     // spawns
